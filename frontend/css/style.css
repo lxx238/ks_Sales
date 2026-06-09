@@ -1,0 +1,106 @@
+/**
+ * BOM智能报价系统 - 额外样式
+ */
+
+/* 按钮成功状态 */
+.btn.success {
+  background: #22c55e;
+  color: #fff;
+  border-color: #22c55e;
+}
+
+/* 按钮禁用状态 */
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 下载按钮 */
+.download-btn {
+  margin-left: 8px;
+}
+
+/* 保存按钮默认隐藏 */
+#manual .toolbar .save-btn {
+  display: none;
+}
+
+/* 当有未匹配编码时显示 */
+#manual .toolbar .save-btn.visible {
+  display: inline-block;
+}
+
+/* 状态框样式增强 */
+.status-box {
+  transition: all 0.3s ease;
+}
+
+.status-box.success {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #86efac;
+}
+
+.status-box.error {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+.status-box.warning {
+  background: #fff7ed;
+  color: #9a3412;
+  border: 1px solid #fdba74;
+}
+
+.status-box.info {
+  background: #eff6ff;
+  color: #1e40af;
+  border: 1px solid #93c5fd;
+}
+
+/* 表格输入框样式 */
+table input.input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+/* 加载动画 */
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.loading {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #f3f3f3;
+  border-top: 2px solid #3498db;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-right: 8px;
+}
+
+/* 文件上传区域拖拽效果 */
+.card.drag-over {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+/* 响应式优化 */
+@media (max-width: 720px) {
+  .toolbar {
+    flex-direction: column;
+  }
+  
+  .btn {
+    width: 100%;
+  }
+  
+  .download-btn {
+    margin-left: 0;
+    margin-top: 8px;
+  }
+}

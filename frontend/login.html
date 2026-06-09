@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>登录 - 科盛集团智能报价平台</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    :root {
+      --bg: #f3f6fb;
+      --panel: #ffffff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --brand: #0f766e;
+      --brand-strong: #0b5d56;
+      --brand-soft: #e6fffb;
+      --shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Source Han Sans SC", "Noto Sans SC", "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      background-image:
+        radial-gradient(circle at 20% 20%, rgba(14, 116, 144, 0.08), transparent 45%),
+        radial-gradient(circle at 80% 0%, rgba(37, 99, 235, 0.08), transparent 35%),
+        linear-gradient(180deg, #f8fafc, #f3f6fb 60%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px;
+    }
+
+    .login-shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+      width: min(980px, 100%);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .login-hero {
+      padding: 40px;
+      background: linear-gradient(140deg, rgba(15, 118, 110, 0.12), rgba(14, 165, 233, 0.08));
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 16px;
+    }
+
+    .brand-mark {
+      height: 56px;
+      width: auto;
+      max-width: 200px;
+      object-fit: contain;
+      display: block;
+    }
+
+    .login-hero h1 {
+      margin: 0;
+      font-size: 26px;
+    }
+
+    .login-hero p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    .login-panel {
+      padding: 40px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 20px;
+    }
+
+    .login-title {
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .login-sub {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    label {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .input {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .input:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
+    }
+
+    .btn {
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      background: linear-gradient(135deg, var(--brand), #0891b2);
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .login-error {
+      display: none;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #fee2e2;
+      color: #991b1b;
+      font-size: 13px;
+      border: 1px solid #fecaca;
+    }
+
+    .login-footnote {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    @media (max-width: 860px) {
+      .login-shell {
+        grid-template-columns: 1fr;
+      }
+
+      .login-hero {
+        border-right: none;
+        border-bottom: 1px solid var(--line);
+      }
+    }
+  </style>
+  <link rel="stylesheet" href="css/layout.css">
+</head>
+<body>
+  <div class="login-shell">
+    <div class="login-hero">
+      <img class="brand-mark" src="img/logo.png" alt="科盛集团">
+      <h1>科盛集团 · 智能报价平台</h1>
+      <p>集中管理各语言组报价流程，统一定价标准与出表规范。</p>
+      <p>请使用管理员或组员账号登录。</p>
+    </div>
+    <div class="login-panel">
+      <div>
+        <div class="login-title">账号登录</div>
+        <div class="login-sub">管理员与各语言组成员账号均可登录。</div>
+      </div>
+      <form id="login-form">
+        <div class="input-group">
+          <label for="login-username">账号</label>
+          <input class="input" id="login-username" name="username" placeholder="请输入账号" autocomplete="username" required />
+        </div>
+        <div class="input-group" style="margin-top: 16px;">
+          <label for="login-password">密码</label>
+          <input class="input" id="login-password" name="password" type="password" placeholder="请输入密码" autocomplete="current-password" required />
+        </div>
+        <div id="login-error" class="login-error" style="margin-top: 16px;"></div>
+        <button class="btn" type="submit" style="margin-top: 18px; width: 100%;">登录</button>
+      </form>
+      <div class="login-footnote">提示：账号由管理员统一分配，如需新增成员请联系管理员。</div>
+    </div>
+  </div>
+
+  <script src="js/utils.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/accounts.js"></script>
+  <script src="js/login.js"></script>
+</body>
+</html>

@@ -1,0 +1,392 @@
+.cad-shell {
+    display: grid;
+    grid-template-columns: 320px minmax(0, 1fr);
+    gap: 18px;
+    margin-top: 18px;
+}
+
+.cad-side {
+    display: grid;
+    gap: 14px;
+    align-content: start;
+}
+
+.cad-card {
+    padding: 18px;
+    border-radius: 8px;
+    background: #f8fbfd;
+    border: 1px solid #dbe7ef;
+    box-shadow: none;
+}
+
+.cad-card h3 {
+    margin: 0 0 8px;
+    font-size: 16px;
+}
+
+.cad-status {
+    display: none;
+    margin-top: 12px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.cad-status.info {
+    display: block;
+    background: #e0effa;
+    color: #0f4c81;
+    border: 1px solid #c7dff4;
+}
+
+.cad-status.success {
+    display: block;
+    background: #dcfce7;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+}
+
+.cad-status.error {
+    display: block;
+    background: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+}
+
+.cad-status.warning {
+    display: block;
+    background: #ffedd5;
+    color: #9a3412;
+    border: 1px solid #fed7aa;
+}
+
+.cad-file-meta {
+    display: grid;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.cad-meta-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    font-size: 13px;
+}
+
+.cad-meta-label {
+    color: var(--muted);
+}
+
+.cad-meta-value {
+    font-weight: 700;
+    color: var(--text);
+    text-align: right;
+}
+
+.cad-preview-list {
+    margin: 12px 0 0;
+    padding-left: 18px;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+.cad-quick-grid {
+    display: grid;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.cad-quick-btn {
+    width: 100%;
+    justify-content: flex-start;
+    text-align: left;
+    background: #ffffff;
+    border: 1px solid #dbe7ef;
+    color: var(--text);
+}
+
+.cad-chat-shell {
+    border-radius: 8px;
+    background: #f8fbfd;
+    border: 1px solid #dbe7ef;
+    overflow: hidden;
+    box-shadow: none;
+    display: grid;
+    grid-template-rows: auto minmax(420px, 1fr) auto;
+    min-height: 720px;
+}
+
+.cad-chat-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 18px 20px;
+    border-bottom: 1px solid #dbe7ef;
+}
+
+.cad-session-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: #dff7f3;
+    color: #115e59;
+    border: 1px solid #b7efe5;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.cad-session-meta {
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.cad-message-list {
+    padding: 20px;
+    display: grid;
+    gap: 16px;
+    align-content: start;
+    overflow-y: auto;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0)),
+        radial-gradient(circle at center top, rgba(15, 118, 110, 0.06), transparent 46%);
+}
+
+.cad-empty-state {
+    padding: 24px;
+    border-radius: 8px;
+    border: 1px dashed #b7efe5;
+    background: #ffffff;
+    color: var(--muted);
+    line-height: 1.8;
+}
+
+.cad-chat-shell .message {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.cad-chat-shell .message.user {
+    justify-content: flex-end;
+}
+
+.cad-chat-shell .avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 800;
+    color: #fff;
+    flex-shrink: 0;
+}
+
+.cad-chat-shell .message.assistant .avatar {
+    background: linear-gradient(135deg, #0f766e, #0f4c81);
+}
+
+.cad-chat-shell .message.user .avatar {
+    background: linear-gradient(135deg, #0f4c81, #1d4ed8);
+    order: 2;
+}
+
+.cad-chat-shell .bubble-wrap {
+    max-width: min(760px, 88%);
+    display: grid;
+    gap: 10px;
+}
+
+.cad-chat-shell .bubble {
+    padding: 14px 16px;
+    border-radius: 18px;
+    line-height: 1.8;
+    font-size: 14px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.cad-chat-shell .message.assistant .bubble {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-top-left-radius: 6px;
+}
+
+.cad-chat-shell .message.user .bubble {
+    background: linear-gradient(135deg, #0f4c81, #1d4ed8);
+    color: #fff;
+    border-top-right-radius: 6px;
+}
+
+.cad-chat-shell .message-time {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.cad-chat-shell .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+}
+
+.cad-chat-shell .summary-card {
+    padding: 14px;
+    border-radius: 16px;
+    background: #ecfdf5;
+    border: 1px solid #bbf7d0;
+}
+
+.cad-chat-shell .summary-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.cad-chat-shell .summary-total {
+    margin-top: 8px;
+    font-size: 24px;
+    font-weight: 800;
+    color: #166534;
+}
+
+.cad-chat-shell .summary-eq {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.cad-chat-shell .assistant-notes {
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: #ffedd5;
+    color: #9a3412;
+    border: 1px solid #fed7aa;
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+.cad-chat-shell .assistant-foot {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.cad-chat-shell .confidence {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.cad-chat-shell .confidence.high {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.cad-chat-shell .confidence.medium {
+    background: #ffedd5;
+    color: #9a3412;
+}
+
+.cad-chat-shell .confidence.low {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.cad-composer {
+    padding: 18px 20px 20px;
+    border-top: 1px solid #dbe7ef;
+    background: #ffffff;
+}
+
+.cad-composer-form {
+    display: grid;
+    gap: 12px;
+}
+
+.cad-composer-box {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: end;
+}
+
+.cad-composer textarea {
+    width: 100%;
+    min-height: 92px;
+    max-height: 180px;
+    resize: vertical;
+    padding: 14px 16px;
+    border-radius: 16px;
+    border: 1px solid #dbe7ef;
+    font: inherit;
+    color: var(--text);
+    background: #fff;
+    outline: none;
+}
+
+.cad-composer textarea:focus {
+    border-color: #38bdf8;
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.18);
+}
+
+.cad-composer-tips {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.cad-chat-shell .typing {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.cad-chat-shell .typing span {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(15, 118, 110, 0.5);
+    animation: cad-pulse 1s infinite ease-in-out;
+}
+
+.cad-chat-shell .typing span:nth-child(2) { animation-delay: 0.12s; }
+.cad-chat-shell .typing span:nth-child(3) { animation-delay: 0.24s; }
+
+@keyframes cad-pulse {
+    0%, 80%, 100% { transform: scale(0.8); opacity: 0.45; }
+    40% { transform: scale(1); opacity: 1; }
+}
+
+@media (max-width: 980px) {
+    .cad-shell {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 720px) {
+    .cad-composer-box {
+        grid-template-columns: 1fr;
+    }
+    .cad-chat-shell .bubble-wrap {
+        max-width: 100%;
+    }
+}

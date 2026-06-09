@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>科盛集团 · 智能报价平台</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/multipage.css">
+  <link rel="stylesheet" href="css/sidebar_layout.css">
+  <link rel="stylesheet" href="css/bom.css">
+  <link rel="stylesheet" href="css/cad.css">
+  <link rel="stylesheet" href="css/layout.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="app-sidebar">
+      <div class="sidebar-inner">
+        <header class="topbar">
+          <div class="brand">
+            <img class="brand-logo" src="img/logo.png" alt="科盛集团">
+            <span class="brand-title">科盛集团</span>
+          </div>
+          <div class="top-actions">
+            <div class="env-pill">内网部署</div>
+            <div class="user-pill">
+              <div class="user-meta">
+                <div class="user-role" id="user-role">角色</div>
+                <div class="user-name" id="user-name">用户</div>
+              </div>
+              <button class="btn small" id="logout-btn">退出</button>
+            </div>
+          </div>
+        </header>
+        <div class="language-switch">
+          <a class="btn" data-nav-group="韩语组">韩语组</a>
+          <a class="btn" data-nav-group="英语组">英语组</a>
+          <a class="btn" data-nav-group="日语组">日语组</a>
+        </div>
+        <nav class="sidebar-nav">
+          <span class="sidebar-label">功能导航</span>
+          <a class="btn primary" href="#" data-nav-page="quotation">报价表与询价表</a>
+          <a class="btn" href="#" data-nav-page="fencegate">围栏 / 门 / EST围栏报价</a>
+          <a class="btn" href="#" data-nav-page="cad">CAD 阵列助手</a>
+          <a class="btn" href="#" data-nav-page="database">数据库显示</a>
+          <a class="btn" href="#" data-nav-page="records">申请记录</a>
+          <a class="btn" href="#" data-nav-page="email-mgmt">询价-邮箱管理</a>
+          <a class="btn" href="#" data-nav-page="image-inquiry">询图-邮箱管理</a>
+          <a class="btn" href="#" data-nav-page="temp-price">临时价格设置</a>
+          <a class="btn" href="#" data-nav-page="temp-price-query">临时价格查询</a>
+          <a class="btn" href="#" data-nav-page="questions">问答中心</a>
+          <a class="btn" href="#" data-nav-page="dashboard">人员使用情况大屏</a>
+        </nav>
+        <nav class="sidebar-nav" id="admin-nav" style="display:none;">
+          <span class="sidebar-label">管理</span>
+          <a class="btn" href="admin.html">管理员后台</a>
+        </nav>
+      </div>
+    </aside>
+
+    <main class="app-main">
+      <div class="wrap">
+        <div class="content-topbar">
+          <div class="user-pill">
+            <div class="user-meta">
+              <div class="user-role" id="user-role-pill">角色</div>
+              <div class="user-name" id="user-name-pill">用户</div>
+            </div>
+            <button class="btn small" id="logout-btn-pill">退出</button>
+          </div>
+        </div>
+        <section class="hero" id="hero-section">
+          <div class="hero-main">
+            <h1 id="hero-title">BOM 智能报价系统</h1>
+            <p id="hero-desc">标准化报价流程：导入物料定价表与 BOM，系统自动匹配价格与图片；对未匹配项补价后，一键生成汇总报价表。</p>
+            <div class="hero-badges">
+              <span class="badge">标准定价表</span>
+              <span class="badge">图片自动匹配</span>
+              <span class="badge">多表拆分汇总</span>
+            </div>
+          </div>
+          <div class="hero-actions">
+            <a class="btn" href="admin.html" id="admin-link" style="display:none;">管理员后台</a>
+          </div>
+        </section>
+        <div id="page-content"></div>
+      </div>
+    </main>
+  </div>
+
+  <script src="js/utils.js"></script>
+  <script src="js/accounts.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/router.js"></script>
+  <script src="js/pages/quotation.js"></script>
+  <script src="js/pages/fence_gate.js"></script>
+  <script src="js/pages/est_fence.js"></script>
+  <script src="js/pages/cad.js"></script>
+  <script src="js/pages/aluminum.js"></script>
+  <script src="js/pages/email_management.js"></script>
+  <script src="js/pages/image_inquiry.js"></script>
+  <script src="js/pages/question.js"></script>
+  <script src="js/pages/temp_price.js"></script>
+  <script src="js/pages/temp_price_query.js"></script>
+  <script src="js/pages/dashboard.js"></script>
+  <script>
+    KSRouter.register('quotation', window.QuotationPage);
+    KSRouter.register('fencegate', window.FenceGatePage);
+    KSRouter.register('cad', window.CadPage);
+    KSRouter.register('database', {
+      init(el) { window.AluminumPage.init(el, 'db'); },
+      destroy() { window.AluminumPage.destroy(); }
+    });
+    KSRouter.register('records', {
+      init(el) { window.AluminumPage.init(el, 'records'); },
+      destroy() { window.AluminumPage.destroy(); }
+    });
+    KSRouter.register('email-mgmt', window.EmailMgmtPage);
+    KSRouter.register('image-inquiry', window.ImageInquiryPage);
+    KSRouter.register('questions', window.QuestionPage);
+    KSRouter.register('temp-price', window.TempPricePage);
+    KSRouter.register('temp-price-query', window.TempPriceQueryPage);
+    KSRouter.register('dashboard', window.DashboardPage);
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const authPromise = window.ksAuthSyncPromise;
+      let auth = null;
+      if (authPromise) {
+        try {
+          auth = await authPromise;
+        } catch (e) {
+          auth = null;
+        }
+      }
+      if (!auth) {
+        window.location.href = 'login.html';
+        return;
+      }
+      window._ksAuth = auth;
+
+      const roleEl = document.getElementById('user-role-pill');
+      const nameEl = document.getElementById('user-name-pill');
+      const logoutBtn = document.getElementById('logout-btn-pill');
+      const group = KSRouter.getGroup();
+      const isAdmin = auth.role === 'admin';
+
+      if (roleEl) roleEl.textContent = auth.roleLabel || auth.role;
+      if (nameEl) nameEl.textContent = auth.username;
+
+      if (!isAdmin) {
+        const allowed = auth.role === 'admin' || auth.role === '业务助理' || auth.group === group;
+        if (!allowed) {
+          const params = new URLSearchParams();
+          params.set('group', auth.group || '');
+          params.set('page', getPermissionFirstPage(auth));
+          window.location.href = `${window.location.pathname}?${params.toString()}`;
+          return;
+        }
+      }
+
+      const heroTitle = document.getElementById('hero-title');
+      if (heroTitle) heroTitle.textContent = `${group} BOM智能报价系统`;
+
+      const adminNav = document.getElementById('admin-nav');
+      const adminLink = document.getElementById('admin-link');
+      if (isAdmin) {
+        if (adminNav) adminNav.style.display = '';
+        if (adminLink) adminLink.style.display = '';
+      }
+
+      if (!isAdmin) {
+        const perms = auth.permissions || [];
+        const permPageMap = {
+          'quotation': '[data-nav-page="quotation"]',
+          'fencegate': '[data-nav-page="fencegate"]',
+          'cad': '[data-nav-page="cad"]',
+          'database': '[data-nav-page="database"]',
+          'records': '[data-nav-page="records"]',
+          'email-mgmt': '[data-nav-page="email-mgmt"]',
+          'image-inquiry': '[data-nav-page="image-inquiry"]',
+          'questions': '[data-nav-page="questions"]',
+          'temp-price': '[data-nav-page="temp-price"]',
+          'temp-price-query': '[data-nav-page="temp-price-query"]',
+        };
+        Object.entries(permPageMap).forEach(([perm, selector]) => {
+          const el = document.querySelector(selector);
+          const allowed = perm === 'fencegate' || perm === 'email-mgmt' || perm === 'image-inquiry'
+            ? perms.includes('quotation')
+            : perms.includes(perm);
+          if (el && !allowed) {
+            el.style.display = 'none';
+          }
+        });
+      }
+
+      document.querySelectorAll('[data-nav-group]').forEach(el => {
+        el.classList.toggle('primary', el.getAttribute('data-nav-group') === group);
+      });
+
+      if (logoutBtn) {
+        logoutBtn.onclick = () => {
+          if (typeof logoutSession === 'function') logoutSession();
+        };
+      }
+
+      KSRouter.init();
+
+      (function applyPermissionDefaultPage() {
+        const permPageMap = {
+          'quotation': 'quotation',
+          'fencegate': 'fencegate',
+          'cad': 'cad',
+          'database': 'database',
+          'records': 'records',
+          'questions': 'questions',
+          'temp-price': 'temp-price',
+        };
+        if (isAdmin) return;
+        const perms = auth.permissions || [];
+        const currentPage = KSRouter.currentPage;
+        const permRequired = {
+          quotation: 'quotation',
+          fencegate: 'quotation',
+          cad: 'cad',
+          database: 'database',
+          records: 'records',
+          'email-mgmt': 'quotation',
+          'image-inquiry': 'quotation',
+          questions: 'questions',
+          'temp-price': 'temp-price',
+        };
+        const required = permRequired[currentPage];
+        if (required && !perms.includes(required)) {
+          for (const perm of Object.keys(permPageMap)) {
+            if (perms.includes(perm)) {
+              KSRouter.navigate(permPageMap[perm], false);
+              return;
+            }
+          }
+        }
+      })();
+
+      const originalNavigate = KSRouter.navigate.bind(KSRouter);
+      KSRouter.navigate = function(page) {
+        if (!isAdmin) {
+          const perms = auth.permissions || [];
+          const permRequired = {
+            quotation: 'quotation',
+            fencegate: 'quotation',
+            cad: 'cad',
+            database: 'database',
+            records: 'records',
+            'email-mgmt': 'quotation',
+            'image-inquiry': 'quotation',
+            questions: 'questions',
+            'temp-price': 'temp-price',
+          };
+          const required = permRequired[page];
+          if (required && !perms.includes(required)) {
+            alert('您没有该功能的访问权限');
+            return;
+          }
+        }
+        originalNavigate(page);
+      };
+    });
+  </script>
+</body>
+</html>
