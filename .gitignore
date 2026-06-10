@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Flask
+instance/
+.webassets-cache
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 临时文件
+uploads/
+outputs/
+*.tmp
+*.log
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# Excel文件（示例数据）
+*.xlsx
+*.xls
+!input/集团标.png
+
+# 环境变量
+.env
+.env.local
+
+# Debug/临时脚本
+debug_*/
+debug_*.py
+bench_*.py
+test_*.py
+benchmark_*.py
+temp_test*/
+output/
+
+# 数据库文件
+*.db

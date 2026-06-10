@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>管理员后台</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/multipage.css">
+  <link rel="stylesheet" href="css/sidebar_layout.css">
+  <style>
+    .admin-tabs {
+      display: flex;
+      gap: 0;
+      border-bottom: 2px solid #e2e8f0;
+      margin-bottom: 20px;
+    }
+    .admin-tab {
+      padding: 10px 24px;
+      font-size: 14px;
+      font-weight: 500;
+      color: #64748b;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .admin-tab:hover { color: #334155; }
+    .admin-tab.active {
+      color: #2563eb;
+      border-bottom-color: #2563eb;
+    }
+    .admin-tab-content { display: none; }
+    .admin-tab-content.active { display: block; }
+  </style>
+</head>
+<body data-group="admin">
+  <div class="app-shell">
+    <aside class="app-sidebar">
+      <div class="sidebar-inner">
+        <header class="topbar">
+          <div class="brand">
+            <img class="brand-logo" src="img/logo.png" alt="科盛集团">
+            <span class="brand-title">科盛集团</span>
+          </div>
+        </header>
+
+        <nav class="page-nav">
+          <span class="sidebar-label">功能导航</span>
+          <a class="btn primary is-active" href="admin.html">管理员后台</a>
+          <a class="btn" href="app.html?group=韩语组&page=quotation">韩语报价</a>
+          <a class="btn" href="app.html?group=英语组&page=quotation">英语报价</a>
+          <a class="btn" href="app.html?group=日语组&page=quotation">日语报价</a>
+          <a class="btn" href="app.html?group=韩语组&page=records">数据库待审核变更</a>
+          <a class="btn" href="app.html?group=韩语组&page=database">数据库显示</a>
+          <a class="btn" href="app.html?group=韩语组&page=questions">问答审核</a>
+          <a class="btn" href="app.html?group=韩语组&page=dashboard">人员使用情况大屏</a>
+        </nav>
+      </div>
+    </aside>
+
+    <main class="app-main">
+      <div class="wrap">
+        <div class="content-topbar">
+          <div class="user-pill">
+            <div class="user-meta">
+              <div class="user-role" id="user-role">管理员</div>
+              <div class="user-name" id="user-name">admin</div>
+            </div>
+            <button class="btn small" id="logout-btn">退出</button>
+          </div>
+        </div>
+
+        <div class="admin-tabs">
+          <button class="admin-tab active" data-tab="users">人员管理</button>
+          <button class="admin-tab" data-tab="usage">报价使用统计</button>
+        </div>
+
+        <div class="admin-tab-content active" id="tab-users">
+          <section class="section" id="users">
+            <div class="upload-grid">
+              <div class="card">
+                <h3>人员统计</h3>
+                <div class="muted">当前人员数量和分组情况。</div>
+                <div class="toolbar">
+                  <span class="tag">总计 <span id="total-accounts">0</span></span>
+                  <span class="tag success">启用 <span id="active-accounts">0</span></span>
+                  <span class="tag warn">停用 <span id="disabled-accounts">0</span></span>
+                </div>
+                <div class="toolbar">
+                  <span class="tag">韩语组 <span id="ko-accounts">0</span></span>
+                  <span class="tag">日语组 <span id="ja-accounts">0</span></span>
+                  <span class="tag">英语组 <span id="en-accounts">0</span></span>
+                  <span class="tag">管理员 <span id="admin-accounts">0</span></span>
+                </div>
+              </div>
+
+              <div class="card">
+                <h3>快捷操作</h3>
+                <div class="muted">恢复默认人员数据或查看操作结果。</div>
+                <div class="toolbar">
+                  <button class="btn warn" id="reset-accounts-btn">恢复默认数据</button>
+                </div>
+                <div id="admin-message" class="notice" style="margin-top: 12px; display: none;"></div>
+              </div>
+
+              <div class="card">
+                <h3>Excel 批量导入</h3>
+                <div class="muted">通过 Excel 文件批量创建/更新登录账号。支持 .xlsx 和 .xls 格式。</div>
+                <div style="margin-top: 12px;">
+                  <div class="toolbar" style="margin-bottom: 8px;">
+                    <button class="btn" id="download-template-btn">下载导入模板</button>
+                  </div>
+                  <form id="import-form" enctype="multipart/form-data">
+                    <div class="form-field">
+                      <label for="import-file">选择 Excel 文件</label>
+                      <input class="input" type="file" id="import-file" name="file" accept=".xlsx,.xls" required />
+                    </div>
+                    <div class="form-actions" style="margin-top: 8px;">
+                      <button class="btn primary" type="submit" id="import-btn">开始导入</button>
+                    </div>
+                  </form>
+                </div>
+                <div id="import-message" class="notice" style="margin-top: 12px; display: none;"></div>
+              </div>
+
+              <div class="card">
+                <h3>权限说明</h3>
+                <div class="muted">管理员可访问全部页面并管理人员；组员仅访问各自业务页面。</div>
+                <div class="notice" style="margin-top: 12px;">账号统一保存于服务器数据库，内网用户共用同一套账号与密码。</div>
+              </div>
+            </div>
+
+            <div style="margin-top: 16px;">
+              <div class="card">
+                <h3>人员列表</h3>
+                <div class="muted">所有人员统一管理，按分组筛选。</div>
+                <div class="toolbar" style="margin-top: 12px;">
+                  <button class="btn primary" id="btn-add-user">新增人员</button>
+                  <select class="input" id="filter-group" style="width: auto;">
+                    <option value="">全部分组</option>
+                    <option>韩语组</option>
+                    <option>日语组</option>
+                    <option>英语组</option>
+                  </select>
+                </div>
+
+                <div id="user-form-panel" style="display: none; margin-top: 16px; padding: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;">
+                  <h4 id="form-title" style="margin: 0 0 12px;">新增人员</h4>
+                  <form id="account-form">
+                    <div class="form-row">
+                      <div class="form-field">
+                        <label for="account-name">中文名</label>
+                        <input class="input" id="account-name" name="name" placeholder="例如：冯光英" />
+                      </div>
+                      <div class="form-field">
+                        <label for="account-nickname">昵称 / 外文名</label>
+                        <input class="input" id="account-nickname" name="nickname" placeholder="例如：풍광영" />
+                      </div>
+                      <div class="form-field">
+                        <label for="account-group">所属分组</label>
+                        <select class="input" id="account-group" name="group">
+                          <option value="">-- 无 --</option>
+                          <option>韩语组</option>
+                          <option>英语组</option>
+                          <option>日语组</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div class="form-row" style="margin-top: 12px;">
+                      <div class="form-field">
+                        <label for="account-mob">手机 (Mob)</label>
+                        <input class="input" id="account-mob" name="mob" placeholder="手机号" />
+                      </div>
+                      <div class="form-field">
+                        <label for="account-tel">座机 (Tel)</label>
+                        <input class="input" id="account-tel" name="tel" placeholder="座机号" />
+                      </div>
+                      <div class="form-field">
+                        <label for="account-fax">传真 (Fax)</label>
+                        <input class="input" id="account-fax" name="fax" placeholder="传真号" />
+                      </div>
+                    </div>
+
+                    <div class="form-row" style="margin-top: 12px;">
+                      <div class="form-field">
+                        <label for="account-email">邮箱 (Email)</label>
+                        <input class="input" id="account-email" name="email" placeholder="邮箱地址" />
+                      </div>
+                    </div>
+
+                    <div class="form-row" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e2e8f0;">
+                      <div class="form-field">
+                        <label for="account-username">账号 <span style="font-weight: normal; color: #64748b;">(留空自动生成)</span></label>
+                        <input class="input" id="account-username" name="username" placeholder="留空则自动生成" />
+                      </div>
+                      <div class="form-field">
+                        <label for="account-password">密码 <span style="font-weight: normal; color: #64748b;">(新账号必填)</span></label>
+                        <input class="input" id="account-password" name="password" type="text" placeholder="设置登录密码" />
+                      </div>
+                      <div class="form-field">
+                        <label for="account-role">角色/组别</label>
+                        <select class="input" id="account-role" name="role">
+                          <option>韩语业务员</option>
+                          <option>英语业务员</option>
+                          <option>日语业务员</option>
+                          <option>业务助理</option>
+                          <option value="admin">管理员</option>
+                        </select>
+                      </div>
+                      <div class="form-field">
+                        <label>状态</label>
+                        <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text);">
+                          <input type="checkbox" id="account-enabled" checked style="width: 16px; height: 16px;">
+                          <span>启用</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div class="form-row" style="margin-top: 12px;" id="permissions-row">
+                      <div class="form-field">
+                        <label>功能权限</label>
+                        <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px;">
+                          <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text);">
+                            <input type="checkbox" class="account-permission" value="quotation" checked style="width: 16px; height: 16px;">
+                            报价表与询价表
+                          </label>
+                          <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text);">
+                            <input type="checkbox" class="account-permission" value="cad" checked style="width: 16px; height: 16px;">
+                            CAD 阵列助手
+                          </label>
+                          <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text);">
+                            <input type="checkbox" class="account-permission" value="database" checked style="width: 16px; height: 16px;">
+                            数据库显示
+                          </label>
+                          <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text);">
+                            <input type="checkbox" class="account-permission" value="database_submit" style="width: 16px; height: 16px;">
+                            数据库提交/上传
+                          </label>
+                          <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text);">
+                            <input type="checkbox" class="account-permission" value="database_download" style="width: 16px; height: 16px;">
+                            完整库下载
+                          </label>
+                          <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text);">
+                            <input type="checkbox" class="account-permission" value="records" checked style="width: 16px; height: 16px;">
+                            申请记录
+                          </label>
+                          <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text);">
+                            <input type="checkbox" class="account-permission" value="records_review" style="width: 16px; height: 16px;">
+                            申请审核
+                          </label>
+                          <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text);">
+                            <input type="checkbox" class="account-permission" value="questions" checked style="width: 16px; height: 16px;">
+                            问答中心
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="form-actions" style="margin-top: 12px;">
+                      <button class="btn primary" type="submit">保存</button>
+                      <button class="btn" type="button" id="btn-cancel-form">取消</button>
+                    </div>
+                  </form>
+                </div>
+
+                <div style="overflow-x: auto; margin-top: 12px;">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>账号</th>
+                        <th>中文名</th>
+                        <th>昵称</th>
+                        <th>分组</th>
+                        <th>手机</th>
+                        <th>邮箱</th>
+                        <th>角色</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody id="account-table-body"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+          <div class="admin-tab-content" id="tab-usage">
+          <div id="usage-overview-panel">
+          <div class="toolbar" style="margin-bottom:16px;">
+            <button class="btn primary" id="usage-export-btn">导出 Excel 报表</button>
+          </div>
+          <div class="upload-grid">
+            <div class="card">
+              <h3>今日</h3>
+              <div class="muted">今日生成次数</div>
+              <div style="font-size: 28px; font-weight: 700; margin-top: 8px;" id="usage-today">0</div>
+              <div class="muted" style="margin-top: 4px;">活跃用户 <span id="usage-today-users">0</span></div>
+            </div>
+            <div class="card">
+              <h3>本周</h3>
+              <div class="muted">本周生成次数</div>
+              <div style="font-size: 28px; font-weight: 700; margin-top: 8px;" id="usage-week">0</div>
+              <div class="muted" style="margin-top: 4px;">活跃用户 <span id="usage-week-users">0</span></div>
+            </div>
+            <div class="card">
+              <h3>本月</h3>
+              <div class="muted">本月生成次数</div>
+              <div style="font-size: 28px; font-weight: 700; margin-top: 8px;" id="usage-month">0</div>
+              <div class="muted" style="margin-top: 4px;">活跃用户 <span id="usage-month-users">0</span></div>
+            </div>
+            <div class="card">
+              <h3>累计</h3>
+              <div class="muted">历史总生成次数</div>
+              <div style="font-size: 28px; font-weight: 700; margin-top: 8px;" id="usage-total">0</div>
+            </div>
+          </div>
+
+          <div class="upload-grid" style="margin-top: 16px;">
+            <div class="card">
+              <h3>本月分组统计</h3>
+              <div class="muted">本月各语言组的报价生成次数。</div>
+              <div style="margin-top: 12px;" id="usage-group-chart"></div>
+            </div>
+
+            <div class="card">
+              <h3>用户排行（本月）</h3>
+              <div class="muted">按报价生成次数降序排列。</div>
+              <div style="overflow-x: auto; margin-top: 12px;">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>用户</th>
+                      <th>分组</th>
+                      <th>次数</th>
+                      <th>成功率</th>
+                      <th>平均耗时</th>
+                      <th>最近活跃</th>
+                    </tr>
+                  </thead>
+                  <tbody id="usage-user-table"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top: 16px;">
+            <h3>详细日志</h3>
+            <div class="muted">所有报价生成记录。</div>
+            <div class="toolbar" style="margin-top: 12px;">
+              <select class="input" id="usage-filter-group" style="width: auto;">
+                <option value="">全部分组</option>
+                <option>韩语组</option>
+                <option>日语组</option>
+                <option>英语组</option>
+              </select>
+              <select class="input" id="usage-filter-status" style="width: auto;">
+                <option value="">全部状态</option>
+                <option value="success">成功</option>
+                <option value="failed">失败</option>
+              </select>
+              <input class="input" type="date" id="usage-filter-start" style="width: auto;" />
+              <input class="input" type="date" id="usage-filter-end" style="width: auto;" />
+              <button class="btn primary" id="usage-search-btn">查询</button>
+            </div>
+            <div style="overflow-x: auto; margin-top: 12px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>用户</th>
+                    <th>分组</th>
+                    <th>项目</th>
+                    <th>BOM文件</th>
+                    <th>类型</th>
+                    <th>匹配</th>
+                    <th>Sheet数</th>
+                    <th>耗时</th>
+                    <th>状态</th>
+                  </tr>
+                </thead>
+                <tbody id="usage-detail-table"></tbody>
+              </table>
+            </div>
+            <div class="toolbar" style="margin-top: 12px;">
+              <span class="muted" id="usage-detail-info"></span>
+              <button class="btn small" id="usage-prev-btn">上一页</button>
+              <button class="btn small" id="usage-next-btn">下一页</button>
+            </div>
+          </div>
+          </div>
+
+          <div id="usage-user-panel" style="display:none;">
+            <div class="toolbar" style="margin-bottom: 16px;">
+              <button class="btn small" id="usage-user-back">&larr; 返回总览</button>
+              <span style="font-size:16px;font-weight:600;margin-left:12px;" id="usage-user-title"></span>
+            </div>
+
+            <div class="upload-grid">
+              <div class="card">
+                <h3>累计生成</h3>
+                <div style="font-size: 28px; font-weight: 700; margin-top: 8px;" id="uq-total">0</div>
+                <div class="muted" style="margin-top: 4px;">成功 <span id="uq-success">0</span> / 失败 <span id="uq-failed">0</span></div>
+              </div>
+              <div class="card">
+                <h3>今日</h3>
+                <div style="font-size: 28px; font-weight: 700; margin-top: 8px;" id="uq-today">0</div>
+              </div>
+              <div class="card">
+                <h3>本月</h3>
+                <div style="font-size: 28px; font-weight: 700; margin-top: 8px;" id="uq-month">0</div>
+              </div>
+              <div class="card">
+                <h3>平均耗时</h3>
+                <div style="font-size: 28px; font-weight: 700; margin-top: 8px;" id="uq-avg-time">-</div>
+                <div class="muted" style="margin-top: 4px;">平均Sheet数 <span id="uq-avg-sheets">0</span></div>
+              </div>
+            </div>
+
+            <div class="upload-grid" style="margin-top: 16px;">
+              <div class="card">
+                <h3>近 30 天趋势</h3>
+                <div style="margin-top: 12px;" id="uq-daily-chart"></div>
+              </div>
+
+              <div class="card">
+                <h3>最近操作记录</h3>
+                <div class="muted">最近 20 条报价生成记录。</div>
+                <div style="overflow-x: auto; margin-top: 12px;">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>时间</th>
+                        <th>项目</th>
+                        <th>类型</th>
+                        <th>匹配</th>
+                        <th>Sheet</th>
+                        <th>耗时</th>
+                        <th>状态</th>
+                      </tr>
+                    </thead>
+                    <tbody id="uq-recent-table"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="js/utils.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/accounts.js"></script>
+  <script src="js/admin.js"></script>
+  <script src="js/usage_stats.js"></script>
+  <script>
+  document.addEventListener('DOMContentLoaded', function() {
+    var tabs = document.querySelectorAll('.admin-tab');
+    var contents = document.querySelectorAll('.admin-tab-content');
+
+    function switchTab(tabName) {
+      tabs.forEach(function(t) { t.classList.toggle('active', t.getAttribute('data-tab') === tabName); });
+      contents.forEach(function(c) { c.classList.toggle('active', c.id === 'tab-' + tabName); });
+      if (history.replaceState) {
+        history.replaceState(null, '', tabName === 'users' ? 'admin.html' : 'admin.html?tab=' + tabName);
+      }
+      window.dispatchEvent(new CustomEvent('admin-tab-changed', { detail: { tab: tabName } }));
+    }
+
+    tabs.forEach(function(tab) {
+      tab.addEventListener('click', function() { switchTab(tab.getAttribute('data-tab')); });
+    });
+
+    var params = new URLSearchParams(window.location.search);
+    var initialTab = params.get('tab') || 'users';
+    if (initialTab !== 'users') switchTab(initialTab);
+  });
+  </script>
+</body>
+</html>

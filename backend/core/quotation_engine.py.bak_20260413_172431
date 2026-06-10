@@ -1,0 +1,3310 @@
+import openpyxl
+import sys
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill, numbers
+from openpyxl.cell.text import InlineFont
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.page import PageMargins
+from openpyxl.drawing.image import Image as XLImage
+from PIL import Image as PILImage
+import tempfile
+import shutil
+import os
+import uuid
+from pathlib import Path
+from decimal import Decimal, ROUND_HALF_UP
+import re
+import pandas as pd
+from collections import defaultdict
+from datetime import datetime
+
+from backend.excel.reader import excel_file_compat, read_excel_compat
+
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+# ==================== 图片插入配置 ====================
+IMAGE_WIDTH = 120  # 像素
+IMAGE_HEIGHT = 80  # 像素
+# 图片插入列（D列）
+IMAGE_COLUMN_INDEX = 4
+
+
+def load_price_mapping(price_file_path):
+    """
+    从定价表中加载价格映射，同时加载单位信息
+    返回: {工程编码: {'price': 价格, 'unit': 单位}} 的字典
+    """
+    print(f"\n💰 正在加载价格表: {price_file_path}")
+
+    price_mapping = {}
+
+    try:
+        # 读取价格表
+        df_price = read_excel_compat(price_file_path, sheet_name=0)
+
+        # 查找列名
+        code_col = None
+        price_col = None
+        unit_col = None
+
+        for col in df_price.columns:
+            col_str = str(col).strip()
+            if '工程编码' in col_str or '编码' in col_str or 'Code' in col_str:
+                code_col = col
+            if '10u小氧化' in col_str or '美元' in col_str or 'price' in col_str.lower():
+                price_col = col
+            if '单位' in col_str or 'Unit' in col_str or 'unit' in col_str:
+                unit_col = col
+
+        # 如果没找到价格列，尝试使用第三列
+        if price_col is None and len(df_price.columns) >= 3:
+            price_col = df_price.columns[2]
+        if code_col is None:
+            code_col = df_price.columns[0]
+
+        # 构建映射
+        for idx, row in df_price.iterrows():
+            code = row[code_col]
+            price = row[price_col]
+
+            # 获取单位
+            unit = ''
+            if unit_col is not None:
+                unit_val = row[unit_col]
+                if pd.notna(unit_val):
+                    unit = str(unit_val).strip()
+
+            if pd.notna(code) and pd.notna(price):
+                code_str = str(code).strip()
+                try:
+                    price_value = float(price)
+                    price_mapping[code_str] = {
+                        'price': price_value,
+                        'unit': unit  # 从价格表获取单位
+                    }
+                except:
+                    pass
+
+        print(f"   ✅ 成功加载 {len(price_mapping)} 个产品的价格信息")
+
+        # 统计单位分布
+        meter_count = sum(1 for v in price_mapping.values() if v['unit'] in ['米', 'm', 'M', 'meter', 'Meter'])
+        piece_count = sum(1 for v in price_mapping.values() if v['unit'] in ['个', '套', '支', '件', 'PCS', 'pcs'])
+        print(
+            f"   📊 价格表单位统计: 米计价 {meter_count} 项, 个/套计价 {piece_count} 项, 其他 {len(price_mapping) - meter_count - piece_count} 项")
+
+        # 显示部分价格示例
+        sample_items = list(price_mapping.items())[:10]
+        if sample_items:
+            print(f"   📊 价格示例: {[(k, v['price'], v['unit']) for k, v in sample_items[:5]]}")
+
+        return price_mapping
+
+    except Exception as e:
+        print(f"   ❌ 加载价格表失败: {e}")
+        return {}
+
+
+def extract_main_name(filename):
+    """
+    从文件名中提取前两部分（格式：前_中_后.xlsx -> 前_中）
+    """
+    name_without_ext = os.path.splitext(filename)[0]
+    parts = name_without_ext.split('_')
+
+    if len(parts) >= 2:
+        main_name = '_'.join(parts[:2])
+        return main_name
+    else:
+        return name_without_ext
+
+
+def normalize_lookup_code(code):
+    """Normalize product code for cross-source matching."""
+    if code is None:
+        return ''
+
+    text = str(code).strip()
+    if not text:
+        return ''
+
+    return re.sub(r'\s+', '', text).upper()
+
+
+def resolve_price_info(price_mapping, product_code):
+    """Resolve material info with exact and normalized code fallback."""
+    if not price_mapping or not product_code:
+        return None
+
+    if product_code in price_mapping:
+        return price_mapping[product_code]
+
+    stripped = str(product_code).strip()
+    if stripped and stripped in price_mapping:
+        return price_mapping[stripped]
+
+    normalized = normalize_lookup_code(product_code)
+    if normalized and normalized in price_mapping:
+        return price_mapping[normalized]
+
+    return None
+
+
+def has_valid_price_info(price_info):
+    """Check whether the matched material record contains a usable price."""
+    if not price_info:
+        return False
+
+    value = price_info.get('price')
+    if value is None:
+        return False
+
+    try:
+        return float(value) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def get_bom_processing_rules():
+    """Shared BOM parsing rules for analysis and report generation."""
+    column_mapping = {
+        '编码': '编码', 'Part No.': '编码', '编号': '编码', 'Code': '编码',
+        '名称': '名称', 'Part Name': '名称', '品名': '名称', 'Description': '名称',
+        '规格': '规格', 'Spec': '规格', '尺寸': '规格', 'Size': '规格',
+        '材质': '材质', 'Material': '材质',
+        '数量': '数量', 'Qty.': '数量', 'Quantity': '数量',
+        '备注': '备注', 'Remark': '备注',
+        '单重': '单重', 'Weight': '单重', '(Kg)': '单重'
+    }
+
+    skip_keywords = [
+        'BOM表', '导轨切法', '柜台角度', '布板方式', '柜台类型', '是否内缩',
+        '切法辅助', '导轨压块配套方案', '导轨定长方案', '中压块类型',
+        '中侧压块配套方案', '导轨总长', '东西板间距', '板规', '阵列',
+        '是否东西可调', '导轨伸出面板长度', '跨距', '基础类型',
+        '备注（', '基数（', '单基总重', '多基总重'
+    ]
+
+    non_bom_sheet_keywords = ['配套', '配置', '价格表', '物料总表', 'Sheet']
+    return column_mapping, skip_keywords, non_bom_sheet_keywords
+
+
+def normalize_selected_bom_keys(selected_bom_keys):
+    if not selected_bom_keys:
+        return None
+
+    if isinstance(selected_bom_keys, str):
+        selected_bom_keys = [selected_bom_keys]
+
+    normalized = {
+        str(key).strip()
+        for key in selected_bom_keys
+        if str(key).strip()
+    }
+    return normalized or None
+
+
+def build_bom_selection_key(sheet_name, row_index):
+    return f'{sheet_name}::{row_index}'
+
+
+def extract_sheet_names_from_keys(selected_key_set):
+    if not selected_key_set:
+        return None
+    return {key.split('::')[0] for key in selected_key_set if '::' in key}
+
+
+def quick_scan_bom_sheets(xls, non_bom_sheet_keywords, selected_key_set=None):
+    target_sheets = extract_sheet_names_from_keys(selected_key_set)
+    bom_sheets = []
+
+    for sheet_name in xls.sheet_names:
+        if any(keyword in sheet_name for keyword in non_bom_sheet_keywords):
+            continue
+        if target_sheets is not None and sheet_name not in target_sheets:
+            continue
+        try:
+            df_scan = xls.parse(sheet_name=sheet_name, header=None, nrows=50)
+        except Exception:
+            continue
+        if df_scan.empty:
+            continue
+        has_bom = False
+        for _, row in df_scan.iterrows():
+            row_str = ' '.join([str(x) if pd.notna(x) else '' for x in row])
+            if "BOM" in row_str and not any(skip in row_str for skip in ['备注：', '备注说明']):
+                has_bom = True
+                break
+        if has_bom:
+            bom_sheets.append(sheet_name)
+
+    return bom_sheets
+
+
+def discover_sheet_bom_starts(df, total_rows, sheet_name=''):
+    bom_starts = []
+
+    for idx, row in df.iterrows():
+        row_str = ' '.join([str(x) if pd.notna(x) else '' for x in row])
+        if "BOM" not in row_str or any(skip in row_str for skip in ['备注：', '备注说明']):
+            continue
+
+        config = extract_config_info(df, idx, total_rows)
+        if config['array'] and config['array'] != '未知':
+            variant_name = f"{config['array']}_{config['variant']}"
+        elif config['angle']:
+            variant_name = f"{config['angle']}度_{config['variant']}"
+        else:
+            variant_name = f"配置{len(bom_starts) + 1}"
+
+        if any(existing['row'] == idx for existing in bom_starts):
+            continue
+
+        bom_starts.append({
+            'row': idx,
+            'config': config,
+            'variant_name': variant_name,
+            'key': build_bom_selection_key(sheet_name, idx),
+        })
+
+    return bom_starts
+
+
+def list_bom_tables(input_file):
+    """List BOM blocks discovered in the uploaded workbook."""
+    _, _, non_bom_sheet_keywords = get_bom_processing_rules()
+    xls = excel_file_compat(input_file)
+    bom_tables = []
+
+    bom_sheet_names = quick_scan_bom_sheets(xls, non_bom_sheet_keywords)
+
+    for sheet_name in bom_sheet_names:
+        sheet_index = xls.sheet_names.index(sheet_name)
+        df = xls.parse(sheet_name=sheet_name, header=None)
+        total_rows = len(df)
+        if df.empty or total_rows < 5:
+            continue
+
+        bom_starts = discover_sheet_bom_starts(df, total_rows, sheet_name=sheet_name)
+        for order, bom_info in enumerate(bom_starts, 1):
+            config = bom_info['config']
+            detail_parts = []
+            if config.get('array') and config['array'] != '未知':
+                detail_parts.append(f"阵列 {config['array']}")
+            if config.get('angle'):
+                detail_parts.append(f"角度 {config['angle']}")
+
+            display_name = f"{sheet_name} / {bom_info['variant_name']}"
+            if detail_parts:
+                display_name = f"{display_name} ({', '.join(detail_parts)})"
+
+            bom_tables.append({
+                'key': bom_info['key'],
+                'sheet_name': sheet_name,
+                'sheet_index': sheet_index,
+                'order': order,
+                'start_row': bom_info['row'] + 1,
+                'variant_name': bom_info['variant_name'],
+                'display_name': display_name,
+                'array': config.get('array') or '',
+            })
+
+    return bom_tables
+
+
+def collect_bom_products(input_file, selected_bom_keys=None):
+    """Collect all BOM products from a workbook using the same parsing rules as report generation."""
+    column_mapping, skip_keywords, non_bom_sheet_keywords = get_bom_processing_rules()
+    selected_key_set = normalize_selected_bom_keys(selected_bom_keys)
+    xls = excel_file_compat(input_file)
+    collected_products = []
+
+    bom_sheet_names = quick_scan_bom_sheets(xls, non_bom_sheet_keywords, selected_key_set)
+
+    for sheet_name in bom_sheet_names:
+        df = xls.parse(sheet_name=sheet_name, header=None)
+        total_rows = len(df)
+        if df.empty or total_rows < 5:
+            continue
+
+        bom_starts = discover_sheet_bom_starts(df, total_rows, sheet_name=sheet_name)
+
+        for i, bom_info in enumerate(bom_starts, 1):
+            if selected_key_set and bom_info.get('key') not in selected_key_set:
+                continue
+
+            bom_df = extract_bom_dataframe(
+                df, bom_info, i, bom_starts, total_rows,
+                column_mapping, skip_keywords
+            )
+            if bom_df is None or bom_df.empty:
+                continue
+
+            products, _, _ = read_bom_from_dataframe(bom_df)
+            collected_products.extend(products)
+
+    return collected_products
+
+
+def read_bom_from_dataframe(df):
+    """
+    从DataFrame中读取BOM表数据
+    """
+    products = []
+    array_info = None
+    span_info = None
+
+    for idx, row in df.iterrows():
+        seq_num = row.get('序号', None)
+        code = row.get('编码', None)
+        name = row.get('名称', None)
+        spec = row.get('规格', None)
+        material = row.get('材质', None)
+        quantity = row.get('数量', None)
+        remark = row.get('备注', None)
+        weight = row.get('单重', None)
+        array_val = row.get('阵列', None)
+        span_val = row.get('跨距', None)
+
+        if array_val and array_val != '' and array_info is None:
+            array_info = str(array_val)
+
+        if span_val and span_val != '' and span_info is None:
+            span_info = str(span_val)
+
+        if all(v is None or v == '' for v in [code, name, spec, material, quantity, weight]):
+            continue
+
+        if quantity is None or quantity == '':
+            quantity = 0
+        try:
+            quantity = float(quantity) if isinstance(quantity, (int, float)) else int(quantity)
+        except (ValueError, TypeError):
+            quantity = 0
+
+        weight_decimal = Decimal('0')
+        weight_has_unit = False
+        weight_unit = ''
+
+        if weight is not None and weight != '':
+            weight_str = str(weight).strip()
+            unit_patterns = [
+                (r'(\d+(?:\.\d+)?)\s*(?:kg|KG|Kg|公斤)', 'kg'),
+                (r'(\d+(?:\.\d+)?)', ''),
+            ]
+            for pattern, unit_pattern in unit_patterns:
+                match = re.search(pattern, weight_str)
+                if match:
+                    try:
+                        weight_decimal = Decimal(match.group(1))
+                        if unit_pattern:
+                            weight_has_unit = True
+                            weight_unit = unit_pattern
+                        break
+                    except (ValueError, TypeError):
+                        continue
+
+        if seq_num is None or seq_num == '':
+            seq_num = idx + 1
+
+        product = {
+            'seq': int(seq_num) if seq_num else idx + 1,
+            'code': str(code) if code else '',
+            'name': str(name) if name else '',
+            'spec': str(spec) if spec else '',
+            'material': str(material) if material else '',
+            'quantity': quantity,
+            'remark': str(remark) if remark else '',
+            'weight': weight_decimal,
+            'weight_has_unit': weight_has_unit,
+            'weight_unit': weight_unit
+        }
+        products.append(product)
+
+    return products, array_info, span_info
+
+
+def parse_array_to_rows_cols(array_str):
+    """解析阵列字符串，返回行数和列数"""
+    if not array_str:
+        return None, None
+    match = re.search(r'(\d+)\s*[×xX*]\s*(\d+)', str(array_str))
+    if match:
+        rows = int(match.group(1))
+        cols = int(match.group(2))
+        return rows, cols
+    return None, None
+
+
+def round_to_2_decimal(value):
+    """使用Decimal精确四舍五入到2位小数"""
+    if isinstance(value, (int, float)):
+        value = Decimal(str(value))
+    elif not isinstance(value, Decimal):
+        return value
+    return value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+WEIGHT_BY_LENGTH_ATTRIBUTES = {'A', 'F', 'TX'}
+
+
+def parse_decimal_number(value):
+    """Parse a numeric field into Decimal when possible."""
+    if value is None or value == '':
+        return None
+
+    if isinstance(value, Decimal):
+        return value
+
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return Decimal(str(value))
+
+    text = str(value).replace(',', '').strip()
+    if not text:
+        return None
+
+    match = re.search(r'-?\d+(?:\.\d+)?', text)
+    if not match:
+        return None
+
+    try:
+        return Decimal(match.group())
+    except (ArithmeticError, ValueError):
+        return None
+
+
+def calculate_bom_total_weight(product, quantity):
+    """Fallback weight formula using BOM unit weight."""
+    if product['weight'] > 0 and quantity > 0:
+        return (
+            product['weight'] * Decimal(str(quantity)),
+            product.get('weight_has_unit', False),
+            product.get('weight_unit', 'kg'),
+        )
+    return None, False, ''
+
+
+def log_weight_formula(
+        row_number,
+        product,
+        formula_name,
+        quantity,
+        price_info,
+        total_weight,
+        extra_detail='',
+        log_buffer=None,
+):
+    """Print the applied weight formula for the current report row."""
+    code = str(product.get('code') or '').strip()
+    name = str(product.get('name') or '').strip()
+    spec = str(product.get('spec') or '').strip()
+    code_attribute = str((price_info or {}).get('code_attribute') or '').strip().upper()
+    db_weight = (price_info or {}).get('db_weight')
+    result_text = ''
+    if total_weight is not None:
+        result_text = str(round_to_2_decimal(total_weight))
+
+    detail_text = f' {extra_detail}' if extra_detail else ''
+    message = (
+        f"[WEIGHT] row={row_number} code={code} name={name} attr={code_attribute or '-'} "
+        f"qty={quantity} spec={spec or '-'} db_weight={db_weight if db_weight not in (None, '') else '-'} "
+        f"formula={formula_name} result={result_text or '-'}{detail_text}"
+    )
+    if log_buffer is not None:
+        log_buffer.append(message)
+        return
+
+    print(message, flush=True)
+
+
+def calculate_report_total_weight(product, quantity, price_info, row_number=None, log_buffer=None):
+    """Apply DB-driven weight formula with BOM fallback."""
+    if quantity <= 0:
+        log_weight_formula(
+            row_number, product, 'skip_qty_non_positive', quantity, price_info, None, log_buffer=log_buffer
+        )
+        return None, False, ''
+
+    fallback_weight, fallback_has_unit, fallback_unit = calculate_bom_total_weight(product, quantity)
+    if not price_info:
+        log_weight_formula(
+            row_number,
+            product,
+            'bom_fallback_missing_db_match',
+            quantity,
+            price_info,
+            fallback_weight,
+            log_buffer=log_buffer,
+        )
+        return fallback_weight, fallback_has_unit, fallback_unit
+
+    db_weight = parse_decimal_number(price_info.get('db_weight'))
+    if db_weight is None or db_weight <= 0:
+        log_weight_formula(
+            row_number,
+            product,
+            'bom_fallback_missing_db_weight',
+            quantity,
+            price_info,
+            fallback_weight,
+            log_buffer=log_buffer,
+        )
+        return fallback_weight, fallback_has_unit, fallback_unit
+
+    code_attribute = str(price_info.get('code_attribute') or '').strip().upper()
+    total_weight = db_weight * Decimal(str(quantity))
+
+    if code_attribute in WEIGHT_BY_LENGTH_ATTRIBUTES:
+        length_mm = extract_length_from_spec(product.get('spec'))
+        if length_mm is None or length_mm <= 0:
+            print(
+                f"   ⚠️ 重量长度解析失败，回退 BOM 单重公式: {product.get('name', '')} "
+                f"(编码: {product.get('code', '')}, 规格: {product.get('spec', '')}, 编码属性: {code_attribute})"
+            )
+            log_weight_formula(
+                row_number,
+                product,
+                'bom_fallback_spec_parse_failed',
+                quantity,
+                price_info,
+                fallback_weight,
+                log_buffer=log_buffer,
+            )
+            return fallback_weight, fallback_has_unit, fallback_unit
+
+        total_weight *= Decimal(str(length_mm)) / Decimal('1000')
+        log_weight_formula(
+            row_number,
+            product,
+            'db_weight_x_qty_x_spec_div_1000',
+            quantity,
+            price_info,
+            total_weight,
+            extra_detail=f'length_mm={length_mm}',
+            log_buffer=log_buffer,
+        )
+        return total_weight, False, ''
+
+    log_weight_formula(
+        row_number,
+        product,
+        'db_weight_x_qty',
+        quantity,
+        price_info,
+        total_weight,
+        log_buffer=log_buffer,
+    )
+    return total_weight, False, ''
+
+
+def extract_code_from_filename(filename):
+    """从图片文件名中提取商品编码"""
+    name_without_ext = os.path.splitext(filename)[0]
+
+    patterns = [
+        r'^([A-Z]+-\d+)(?:-\d+)?[_\-\s\u4e00-\u9fff]',
+        r'^([A-Z]+-\d+)(?:-\d+)?$',
+        r'^([A-Z]+\d+[xX]\d+)[_\-\s\u4e00-\u9fff]',
+        r'^([A-Z]+\d+[xX]\d+)$',
+        r'^([A-Z]+-[A-Z0-9]+-\d+)[_\-\s\u4e00-\u9fff]',
+        r'^([A-Z]+-[A-Z0-9]+-\d+)$',
+        r'^([A-Z]+-\d+)[_\-\s\u4e00-\u9fff]',
+        r'^([A-Z]+-\d+)$',
+        r'^([A-Z]+\d+)[_\-\s\u4e00-\u9fff]',
+        r'^([A-Z]+\d+)$',
+    ]
+
+    for pattern in patterns:
+        match = re.match(pattern, name_without_ext, re.IGNORECASE)
+        if match:
+            code = match.group(1).upper()
+            if code and code[0].isalpha() and any(c.isdigit() for c in code):
+                return code
+
+    code_patterns = [
+        r'([A-Z]+-\d+)(?:-\d+)?',
+        r'([A-Z]+\d+[xX]\d+)',
+        r'([A-Z]+-[A-Z0-9]+-\d+)',
+        r'([A-Z]+-\d+)',
+        r'([A-Z]+\d+)',
+    ]
+
+    for pattern in code_patterns:
+        match = re.search(pattern, name_without_ext, re.IGNORECASE)
+        if match:
+            code = match.group(1).upper()
+            if code and code[0].isalpha() and any(c.isdigit() for c in code):
+                return code
+
+    return None
+
+
+def scan_images(image_folder):
+    """扫描图片文件夹，建立编码到图片路径的映射"""
+    code_to_images = {}
+    extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.JPG', '.PNG', '.JPEG'}
+
+    if not image_folder or not os.path.exists(image_folder):
+        return code_to_images
+
+    for root, _, files in os.walk(image_folder):
+        for filename in files:
+            ext = os.path.splitext(filename)[1]
+            if ext in extensions:
+                code = extract_code_from_filename(filename)
+                if code:
+                    code_to_images.setdefault(code, []).append(os.path.join(root, filename))
+
+    return code_to_images
+
+
+def find_latest_image_log(search_dirs):
+    """在多个目录中查找最新的图片匹配记录txt"""
+    latest_path = None
+    latest_mtime = 0
+    for d in search_dirs:
+        if not d or not os.path.exists(d):
+            continue
+        for name in os.listdir(d):
+            if name.startswith("图片匹配记录_") and name.endswith(".txt"):
+                path = os.path.join(d, name)
+                try:
+                    mtime = os.path.getmtime(path)
+                except:
+                    continue
+                if mtime > latest_mtime:
+                    latest_mtime = mtime
+                    latest_path = path
+    return latest_path
+
+
+def load_image_mapping_from_log(log_path):
+    """从图片匹配记录日志中解析编码->图片路径"""
+    mapping = {}
+    if not log_path or not os.path.exists(log_path):
+        return mapping
+
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+            current_code = None
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+
+                code_match = re.search(r'^(?:编码|缂栫爜|Code)\\s*[:：]\\s*([A-Za-z0-9\\-]+)', line)
+                if code_match:
+                    current_code = code_match.group(1).strip()
+                    continue
+
+                path_match = re.search(r'([A-Za-z]:\\\\.+?\\.(?:jpg|jpeg|png|gif|bmp|webp))', line, re.IGNORECASE)
+                if path_match and current_code:
+                    img_path = path_match.group(1).strip()
+                    if os.path.exists(img_path):
+                        mapping[current_code] = [img_path]
+    except Exception:
+        return mapping
+
+    return mapping
+
+
+def prepare_image_for_excel(image_path, target_width=IMAGE_WIDTH, target_height=IMAGE_HEIGHT, temp_dir=None,
+                            cache=None):
+    """准备图片用于Excel插入（转RGB并压缩）"""
+    if not image_path or not os.path.exists(image_path):
+        return None
+
+    if cache is not None and image_path in cache:
+        return cache[image_path]
+
+    if temp_dir is None:
+        temp_dir = tempfile.gettempdir()
+    os.makedirs(temp_dir, exist_ok=True)
+
+    temp_filename = f"temp_{abs(hash(image_path))}_{os.path.basename(image_path)}"
+    temp_filename = os.path.splitext(temp_filename)[0] + ".jpg"
+    temp_path = os.path.join(temp_dir, temp_filename)
+
+    if os.path.exists(temp_path):
+        if cache is not None:
+            cache[image_path] = temp_path
+        return temp_path
+
+    try:
+        img = PILImage.open(image_path)
+
+        if img.mode in ('RGBA', 'LA', 'P'):
+            rgb_img = PILImage.new('RGB', img.size, (255, 255, 255))
+            if img.mode == 'P':
+                img = img.convert('RGBA')
+            rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+            img = rgb_img
+
+        img.thumbnail((target_width, target_height), PILImage.Resampling.LANCZOS)
+        img.save(temp_path, "JPEG", quality=85)
+
+        if cache is not None:
+            cache[image_path] = temp_path
+        return temp_path
+    except Exception:
+        return None
+
+
+def add_image_centered_in_cell(
+        ws,
+        img_path,
+        cell_row,
+        cell_col,
+        img_width=IMAGE_WIDTH,
+        img_height=IMAGE_HEIGHT,
+):
+    """按单元格中心点居中插入图片（逻辑参考图片居中.py）"""
+    try:
+        img = XLImage(img_path)
+        img.width = img_width
+        img.height = img_height
+
+        from openpyxl.utils import column_width_to_pixels, row_height_to_pixels
+        from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
+
+        col_letter = get_column_letter(cell_col)
+        col_width_pixels = column_width_to_pixels(ws.column_dimensions[col_letter].width or 8.43)
+        row_height_pixels = row_height_to_pixels(ws.row_dimensions[cell_row].height or 15)
+
+        offset_x = (col_width_pixels - img_width) / 2
+        offset_y = (row_height_pixels - img_height) / 2
+        offset_x = max(0, offset_x)
+        offset_y = max(0, offset_y)
+
+        EMU_PER_PIXEL = 9525
+        offset_x_emu = int(offset_x * EMU_PER_PIXEL)
+        offset_y_emu = int(offset_y * EMU_PER_PIXEL)
+
+        anchor = OneCellAnchor()
+        anchor.from_ = AnchorMarker(
+            col=cell_col - 1,
+            colOff=offset_x_emu,
+            row=cell_row - 1,
+            rowOff=offset_y_emu
+        )
+        img.anchor = anchor
+
+        ws.add_image(img)
+        return True
+    except Exception:
+        try:
+            img = XLImage(img_path)
+            img.width = img_width
+            img.height = img_height
+            cell_ref = get_column_letter(cell_col) + str(cell_row)
+            ws.add_image(img, cell_ref)
+            return True
+        except Exception:
+            return False
+
+
+def add_image_centered_in_range(ws, img, start_col, start_row, end_col, end_row):
+    """Center an existing openpyxl image inside a merged range."""
+    try:
+        from openpyxl.utils import column_width_to_pixels, row_height_to_pixels
+        from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
+        use_utils = True
+    except Exception:
+        use_utils = False
+
+    def _col_px(col_idx):
+        col_letter = get_column_letter(col_idx)
+        width = ws.column_dimensions[col_letter].width or 8.43
+        if use_utils:
+            try:
+                return column_width_to_pixels(width)
+            except Exception:
+                pass
+        return width * 7.5
+
+    def _row_px(row_idx):
+        height = ws.row_dimensions[row_idx].height or 15
+        if use_utils:
+            try:
+                return row_height_to_pixels(height)
+            except Exception:
+                pass
+        return height * 1.33
+
+    total_width = sum(_col_px(col) for col in range(start_col, end_col + 1))
+    total_height = sum(_row_px(row) for row in range(start_row, end_row + 1))
+
+    img_width = img.width
+    img_height = img.height
+
+    offset_x = max(0, (total_width - img_width) / 2)
+    offset_y = max(0, (total_height - img_height) / 2)
+
+    EMU_PER_PIXEL = 9525
+    offset_x_emu = int(offset_x * EMU_PER_PIXEL)
+    offset_y_emu = int(offset_y * EMU_PER_PIXEL)
+
+    anchor = OneCellAnchor()
+    anchor.from_ = AnchorMarker(
+        col=start_col - 1,
+        colOff=offset_x_emu,
+        row=start_row - 1,
+        rowOff=offset_y_emu
+    )
+    img.anchor = anchor
+    ws.add_image(img)
+    return True
+
+
+def center_images_in_column(ws, target_col=IMAGE_COLUMN_INDEX, scale_to_fit=False, max_scale=1.0):
+    """Center existing images in the given column by adjusting anchor offsets."""
+    EMU_PER_PIXEL = 9525
+    default_col_width = 8.43
+    default_row_height = 15
+
+    try:
+        from openpyxl.utils import column_width_to_pixels, row_height_to_pixels
+        use_utils = True
+    except Exception:
+        use_utils = False
+
+    def _col_px(col_idx):
+        col_letter = get_column_letter(col_idx)
+        width = ws.column_dimensions[col_letter].width
+        if width is None:
+            width = default_col_width
+        if use_utils:
+            try:
+                return column_width_to_pixels(width)
+            except Exception:
+                pass
+        return width * 7.5
+
+    def _row_px(row_idx):
+        height = ws.row_dimensions[row_idx].height
+        if height is None:
+            height = default_row_height
+        if use_utils:
+            try:
+                return row_height_to_pixels(height)
+            except Exception:
+                pass
+        return height * 1.33
+
+    processed = 0
+    for img in list(ws._images):
+        anchor = img.anchor
+
+        if hasattr(anchor, '_from'):
+            from_col = anchor._from.col + 1
+            from_row = anchor._from.row + 1
+        elif hasattr(anchor, 'from_col'):
+            from_col = anchor.from_col + 1
+            from_row = anchor.from_row + 1
+        else:
+            continue
+
+        if from_col != target_col:
+            continue
+
+        cell_width_px = _col_px(from_col)
+        cell_height_px = _row_px(from_row)
+
+        img_width = img.width
+        img_height = img.height
+
+        if scale_to_fit and img_width and img_height:
+            scale_w = cell_width_px / img_width
+            scale_h = cell_height_px / img_height
+            scale = min(scale_w, scale_h, max_scale)
+            if scale < 1.0:
+                img_width = int(img_width * scale)
+                img_height = int(img_height * scale)
+                img.width = img_width
+                img.height = img_height
+
+        offset_x = (cell_width_px - img_width) / 2
+        offset_y = (cell_height_px - img_height) / 2
+        offset_x = max(0, offset_x)
+        offset_y = max(0, offset_y)
+
+        offset_x_emu = int(offset_x * EMU_PER_PIXEL)
+        offset_y_emu = int(offset_y * EMU_PER_PIXEL)
+
+        if hasattr(anchor, '_from'):
+            anchor._from.colOff = offset_x_emu
+            anchor._from.rowOff = offset_y_emu
+        elif hasattr(anchor, 'from_col_off'):
+            anchor.from_col_off = offset_x_emu
+            anchor.from_row_off = offset_y_emu
+
+        processed += 1
+
+    return processed
+
+
+def extract_length_from_spec(spec_str):
+    """
+    从规格中提取长度（单位：毫米）
+    支持多种格式：xxxmm、xxx mm、L=xxx、xxx米、xxxm等
+    返回长度值（毫米），如果无法提取则返回None
+    """
+    if not spec_str:
+        return None
+
+    spec_str = str(spec_str)
+
+    # 长度提取模式（优先级从高到低）
+    length_patterns = [
+        (r'(\d+(?:\.\d+)?)\s*mm', 1),  # 123mm 或 123 mm
+        (r'(\d+(?:\.\d+)?)\s*MM', 1),  # 123MM
+        (r'(\d+(?:\.\d+)?)\s*毫米', 1),  # 123毫米
+        (r'长度[：:]?\s*(\d+(?:\.\d+)?)', 1),  # 长度:123
+        (r'长[：:]?\s*(\d+(?:\.\d+)?)', 1),  # 长:123
+        (r'L[=:]?\s*(\d+(?:\.\d+)?)', 1),  # L=123
+        (r'(\d+(?:\.\d+)?)\s*米', 1000),  # 123米 -> 乘以1000转毫米
+        (r'(\d+(?:\.\d+)?)\s*m\b', 1000),  # 123m -> 乘以1000转毫米
+        (r'(\d+(?:\.\d+)?)\s*M\b', 1000),  # 123M
+        (r'(\d+(?:\.\d+)?)\s*M$', 1000),  # 末尾的123M
+        (r'(\d+(?:\.\d+)?)\s*米$', 1000),  # 末尾的123米
+        (r'(\d+(?:\.\d+)?)\s*mm$', 1),  # 末尾的123mm
+        (r'长度[：:]?\s*(\d+(?:\.\d+)?)\s*mm', 1),  # 长度:123mm
+        (r'(\d+(?:\.\d+)?)\s*mm长度', 1),  # 123mm长度
+        (r'(\d+(?:\.\d+)?)\s*$', 1),  # 纯数字，假设为毫米
+    ]
+
+    for pattern, multiplier in length_patterns:
+        match = re.search(pattern, spec_str, re.IGNORECASE)
+        if match:
+            try:
+                length = float(match.group(1))
+                length_mm = length * multiplier
+                # 如果长度大于10000，可能单位是毫米但数值过大，检查一下
+                if length_mm > 10000 and multiplier == 1:
+                    # 可能是毫米单位，保持原值
+                    pass
+                return length_mm
+            except (ValueError, TypeError):
+                continue
+
+    return None
+
+
+def delete_empty_weight_rows_and_renumber(ws, data_start_row):
+    """删除重量（I列）为空的行，并重新编号"""
+    print("\n🗑️ 开始清理重量为空的行...")
+
+    rows_to_delete = []
+    current_row = data_start_row
+    while current_row <= ws.max_row:
+        weight_cell = ws.cell(row=current_row, column=9)
+        weight_value = weight_cell.value
+
+        is_empty = False
+        if weight_value is None or weight_value == '':
+            is_empty = True
+        elif isinstance(weight_value, (int, float)) and weight_value == 0:
+            is_empty = True
+        elif isinstance(weight_value, str):
+            try:
+                match = re.search(r'(\d+(?:\.\d+)?)', weight_value)
+                if match and float(match.group(1)) == 0:
+                    is_empty = True
+            except:
+                pass
+
+        if is_empty:
+            name_cell = ws.cell(row=current_row, column=2)
+            if name_cell.value is None or name_cell.value == '':
+                rows_to_delete.append(current_row)
+            else:
+                rows_to_delete.append(current_row)
+        current_row += 1
+
+    deleted_count = 0
+    for row in sorted(rows_to_delete, reverse=True):
+        ws.delete_rows(row)
+        deleted_count += 1
+
+    print(f"✅ 已删除 {deleted_count} 行")
+
+    print("\n🔢 重新编号序号列...")
+    new_seq = 1
+    current_row = data_start_row
+    while current_row <= ws.max_row:
+        name_cell = ws.cell(row=current_row, column=2)
+        if name_cell.value and name_cell.value != '':
+            ws.cell(row=current_row, column=1, value=new_seq)
+            new_seq += 1
+        current_row += 1
+
+    print(f"✅ 清理完成，剩余 {new_seq - 1} 个有效产品")
+    return ws.max_row
+
+
+def create_inquiry_sheet(workbook, unmatched_products, source_sheet_name, inquiry_requester=''):
+    """
+    创建询价表，将未匹配价格的产品填入
+    返回创建的工作表对象
+    """
+    print(f"\n📋 创建询价表，包含 {len(unmatched_products)} 个未匹配价格的产品")
+
+    sheet_name = f"询价表"
+    if len(sheet_name) > 31:
+        sheet_name = sheet_name[:31]
+
+    original_sheet_name = sheet_name
+    counter = 1
+    while sheet_name in workbook.sheetnames:
+        sheet_name = f"{original_sheet_name}_{counter}"
+        counter += 1
+
+    ws = workbook.create_sheet(title=sheet_name)
+
+    # ========== 样式定义 ==========
+    thin = Side(style='thin', color='000000')
+    thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    header_fill_1 = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")  # 业务/研发沟通确定 - 蓝色
+    header_fill_2 = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")  # 研发提供 - 绿色
+    header_fill_3 = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")  # 采购提供 - 黄色
+
+    header_font = Font(bold=True)
+    normal_font = Font(bold=False)
+    center_alignment = Alignment(horizontal="center", vertical="center")
+    left_alignment = Alignment(horizontal="left", vertical="center")
+
+    # 设置列宽
+    column_widths = [
+        13.0, 15.625, 22.175, 74.875, 59.8333333333333, 26.4083333333333, 32.1833333333333, 36.0916666666667,
+        19.5, 13.0, 5.25, 4.25, 9.375, 13.0, 12.5, 20.375,
+        15.125, 13.0, 7.125, 10.5, 9.0, 15.125, 7.125, 30.25,
+        10.5, 13.0, 13.0, 10.375, 11.125, 7.125, 9.375
+    ]
+
+    for col_idx, width in enumerate(column_widths, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    # 设置第一行表头（三个合并区域）
+    ws.merge_cells('A1:H1')
+    ws['A1'] = "业务/研发沟通确定"
+    ws['A1'].fill = header_fill_1
+    ws['A1'].font = header_font
+    ws['A1'].alignment = center_alignment
+    ws['A1'].border = thin_border
+
+    ws.merge_cells('I1:Q1')
+    ws['I1'] = "研发提供"
+    ws['I1'].fill = header_fill_2
+    ws['I1'].font = header_font
+    ws['I1'].alignment = center_alignment
+    ws['I1'].border = thin_border
+
+    ws.merge_cells('R1:AE1')
+    ws['R1'] = "采购提供"
+    ws['R1'].fill = header_fill_3
+    ws['R1'].font = header_font
+    ws['R1'].alignment = center_alignment
+    ws['R1'].border = thin_border
+
+    # 设置第二行表头
+    header_row2 = [
+        "询价人", "询价日期", "产品编码", "产品名称", "规格 (mm)", "数量", "销售单位", "备注",
+        "产品类别", "售价", "售价单位", "", "报价日期", "表面处理", "重量属性 (kg)", "备注",
+        "是否带图档附件", "产品归属项目", "采购员", "采购单价", "采购单位", "是否含税含运费",
+        "供应商", "备注 (不同起订量不同单价之类)", "挤压模", "费用", "冲孔模", "费用",
+        "最低采购量", "上机费", "其它备注"
+    ]
+
+    # 需要加粗的列
+    bold_columns = [3, 7, 9, 10, 20]
+
+    for col_idx, value in enumerate(header_row2, start=1):
+        if col_idx == 12:  # 跳过 L2（因为要与K列合并）
+            continue
+
+        cell = ws.cell(row=2, column=col_idx, value=value)
+
+        # 根据列所属区域设置背景色
+        if col_idx <= 8:  # A-H 列：业务/研发沟通确定
+            cell.fill = header_fill_1
+        elif col_idx <= 17:  # I-Q 列：研发提供
+            cell.fill = header_fill_2
+        else:  # R-AE 列：采购提供
+            cell.fill = header_fill_3
+
+        if col_idx in bold_columns:
+            cell.font = header_font
+        else:
+            cell.font = normal_font
+        cell.alignment = center_alignment
+        cell.border = thin_border
+
+    # 合并 K2:L2
+    ws.merge_cells('K2:L2')
+
+    # 获取当前日期
+    current_date = datetime.now().strftime("%Y.%m.%d")
+
+    # 填入数据行
+    current_row = 3
+    inquiry_requester = str(inquiry_requester or '').strip()
+
+    for product in unmatched_products:
+        # A列: 询价人
+        ws.cell(row=current_row, column=1, value=inquiry_requester)
+        # B列: 询价日期
+        ws.cell(row=current_row, column=2, value=current_date)
+        # C列: 产品编码
+        ws.cell(row=current_row, column=3, value=product['code'])
+        # D列: 产品名称
+        ws.cell(row=current_row, column=4, value=product['name'])
+        # E列: 规格 (mm)
+        ws.cell(row=current_row, column=5, value=product['spec'])
+        # F列: 数量
+        quantity = product['quantity']
+        if quantity > 0:
+            ws.cell(row=current_row, column=6, value=int(quantity) if quantity % 1 == 0 else quantity)
+        else:
+            ws.cell(row=current_row, column=6, value="")
+        # G列: 销售单位（留空）
+        # H列: 备注
+
+        # 为这一行的所有单元格设置边框和对齐
+        ws.cell(row=current_row, column=7, value=product.get('unit', ''))
+        ws.cell(row=current_row, column=8, value='铝价数据库无法匹配')
+
+        for col in range(1, 32):
+            cell = ws.cell(row=current_row, column=col)
+            cell.border = thin_border
+            cell.alignment = left_alignment
+
+        current_row += 1
+
+    # 设置行高
+    ws.row_dimensions[1].height = 20.1
+    ws.row_dimensions[2].height = 20.1
+    for row in range(3, current_row):
+        ws.row_dimensions[row].height = 25.0
+
+    # 冻结窗格
+    ws.freeze_panes = 'B3'
+
+    print(f"   ✅ 询价表创建成功: {sheet_name} (共 {len(unmatched_products)} 行数据)")
+
+    return ws
+
+
+def save_inquiry_sheet_to_file(unmatched_products, output_dir, input_filename=None, inquiry_requester=''):
+    """
+    将询价表保存为独立的Excel文件
+    不再去重，保留所有未匹配的产品
+    """
+    if not unmatched_products:
+        return None
+
+    # 创建新的工作簿
+    wb = Workbook()
+    default_sheet = wb.active
+    wb.remove(default_sheet)
+
+    # 创建询价表
+    ws = create_inquiry_sheet(wb, unmatched_products, "汇总", inquiry_requester=inquiry_requester)
+
+    # 生成文件名 - 直接命名为"询价表"
+    filename = f"询价表.xlsx"
+
+    # 如果文件已存在，添加时间戳
+    output_file = os.path.join(output_dir, filename)
+    counter = 1
+    while os.path.exists(output_file):
+        filename = f"询价表_{counter}.xlsx"
+        output_file = os.path.join(output_dir, filename)
+        counter += 1
+
+    # 保存文件
+    wb.save(output_file)
+    print(f"\n📋 询价表已保存为独立文件: {output_file}")
+    print(f"   📊 包含 {len(unmatched_products)} 个未匹配价格的产品")
+
+    return output_file
+
+
+def create_quotation_from_dataframe(
+        df,
+        workbook,
+        sheet_name_prefix,
+        price_mapping,
+        image_path=None,
+        image_folder=None,
+        code_to_images=None,
+        image_temp_dir=None,
+        image_cache=None,
+        unmatched_products_list=None,
+        contact_info=None,
+        config=None,
+        matrix_data=None,
+        group=None,
+):
+    """
+    从DataFrame创建报价表（直接添加到工作簿中）
+    计价单位从价格表获取
+    计价逻辑：
+    - 价格表单位=米：总价 = (长度/1000) × 单价 × 数量
+    - 价格表单位=个/套/支：总价 = 单价 × 数量
+    """
+    all_products, array_info, span_info = read_bom_from_dataframe(df)
+    total_products = len(all_products)
+
+    rows, cols = parse_array_to_rows_cols(array_info)
+    matrix_data = matrix_data or {}
+    matrix_project_name = str(matrix_data.get('project_name') or '').strip()
+    matrix_output_wp = matrix_data.get('output_wp')
+    matrix_set_count = matrix_data.get('set_count')
+    matrix_max_wind = matrix_data.get('max_wind_speed')
+    matrix_max_snow = matrix_data.get('max_snow_load')
+    matrix_module_watt = matrix_data.get('module_wattage')
+    matrix_module_size = matrix_data.get('module_size')
+    if not isinstance(matrix_set_count, int) or matrix_set_count <= 0:
+        matrix_set_count = None
+    total_table_count = matrix_set_count or 1
+
+    sheet_name = extract_main_name(sheet_name_prefix)
+    if len(sheet_name) > 31:
+        sheet_name = sheet_name[:31]
+
+    original_sheet_name = sheet_name
+    counter = 1
+    while sheet_name in workbook.sheetnames:
+        sheet_name = f"{original_sheet_name}_{counter}"
+        counter += 1
+
+    ws = workbook.create_sheet(title=sheet_name)
+    print(f"📝 创建工作表: {sheet_name}")
+
+    # ========== 样式定义 ==========
+    thin = Side(style='thin', color='000000')
+    thick = Side(style='medium', color='000000')
+    thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    no_border = Border()
+
+    title_font = Font(name='Malgun Gothic', size=36, bold=True, color='000000')
+    normal_font = Font(name='Malgun Gothic', size=16, color='000000')
+    header_font = Font(name='Malgun Gothic', size=16, bold=True, color='000000')
+    small_bold_font = Font(name='Malgun Gothic', size=16, bold=True, color='000000')
+    red_small_font = Font(name='Malgun Gothic', size=16, bold=True, color='FF0000')
+    currency_number_format = '"US$" #,##0.00'
+
+    a7_font = Font(name='Malgun Gothic', size=16, bold=True, color='FFFFFF')
+    a7_fill = PatternFill(start_color='0070C0', end_color='0070C0', fill_type='solid')
+
+    # 添加黄色填充样式用于未匹配价格的行
+    yellow_fill = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
+
+    center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    left_align = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    right_align = Alignment(horizontal='right', vertical='center', wrap_text=True)
+
+    # ========== 设置列宽 ==========
+    column_widths = {
+        'A': 15.77, 'B': 28.67, 'C': 34.13, 'D': 30.03, 'E': 34.58,
+        'F': 24.58, 'G': 25.49, 'H': 24.13, 'I': 22.31, 'J': 25.49,
+    }
+    for col, width in column_widths.items():
+        ws.column_dimensions[col].width = width
+
+    # ========== 先临时创建所有数据行 ==========
+    data_start_row = 10
+
+    for row in range(1, data_start_row + total_products + 20):
+        if row not in [1, 2, 3, 4, 5, 6, 7, 8, 9]:
+            ws.row_dimensions[row].height = 61
+
+    row_heights_temp = {
+        1: 18, 2: 66, 3: 30, 4: 30, 5: 30, 6: 30, 7: 30, 8: 20, 9: 70.7,
+    }
+    for row, height in row_heights_temp.items():
+        ws.row_dimensions[row].height = height
+
+    # ========== 第1行: 空行 ==========
+    for col in range(1, 11):
+        ws.cell(row=1, column=col)
+
+    # ========== 第2行: 标题 ==========
+    ws.merge_cells('A2:J2')
+    ws['A2'] = matrix_project_name or '태양광 시스템 견적서'
+    ws['A2'].font = title_font
+    ws['A2'].alignment = center_align
+
+    # ========== 合并 A3:B6 区域并嵌入图片 ==========
+    ws.merge_cells('A3:B6')
+    if image_path and os.path.exists(image_path):
+        try:
+            img = XLImage(img=image_path)
+            width_a = ws.column_dimensions['A'].width
+            width_b = ws.column_dimensions['B'].width
+            total_width_pixels = (width_a + width_b) * 7
+
+            height_4 = ws.row_dimensions[4].height
+            height_5 = ws.row_dimensions[5].height
+            height_6 = ws.row_dimensions[6].height
+            total_height_pts = height_4 + height_5 + height_6
+            total_height_pixels = total_height_pts * 1.33
+
+            target_width = total_width_pixels * 1.05
+            target_height = total_height_pixels * 1.8
+
+            original_width = img.width
+            original_height = img.height
+            original_ratio = original_width / original_height
+            target_ratio = target_width / target_height
+
+            if original_ratio > target_ratio:
+                img.width = target_width
+                img.height = target_width / original_ratio
+            else:
+                img.height = target_height
+                img.width = target_height * original_ratio
+
+            min_size = 50
+            if img.width < min_size or img.height < min_size:
+                img.width = max(img.width, min_size)
+                img.height = max(img.height, min_size)
+
+            ws.add_image(img, 'A4')
+        except Exception as e:
+            ws['A4'] = '[图片未找到或加载失败]'
+            ws['A4'].font = normal_font
+            ws['A4'].alignment = center_align
+    else:
+        ws['A4'] = ''
+        ws['A4'].alignment = center_align
+
+    # ========== 第3-7行: 项目信息区域 ==========
+    contact_defaults = {
+        'contact_name': '진설정',
+        'phone': '0086-18050053693',
+        'tel': '0086-592-5795672',
+        'fax': '0086-592-5738212'
+    }
+    contact_info = contact_info or {}
+    contact_name = contact_info.get('contact_name') or contact_defaults['contact_name']
+    phone = contact_info.get('phone') or contact_defaults['phone']
+    tel = contact_info.get('tel') or contact_defaults['tel']
+    fax = contact_info.get('fax') or contact_defaults['fax']
+
+    ws['C3'] = f"담당자:{contact_name}"
+    ws['C3'].font = normal_font
+    ws['C3'].alignment = center_align
+
+    ws['D3'] = '설치각도'
+    ws['D3'].font = normal_font
+    ws['D3'].alignment = center_align
+
+    ws['F3'] = '모듈사이즈'
+    ws['F3'].font = normal_font
+    ws['F3'].alignment = center_align
+
+    ws['C4'] = f"전화: {phone}"
+    ws['C4'].font = normal_font
+    ws['C4'].alignment = center_align
+
+    ws['D4'] = '최대풍속'
+    ws['D4'].font = normal_font
+    ws['D4'].alignment = center_align
+
+    ws['E4'] = matrix_max_wind or ''
+    ws['E4'].font = normal_font
+    ws['E4'].alignment = center_align
+
+    ws['F4'] = '모듈 발전량'
+    ws['F4'].font = normal_font
+    ws['F4'].alignment = center_align
+
+    ws['G4'] = f"{matrix_module_watt}w" if matrix_module_watt else ''
+    ws['G4'].font = normal_font
+    ws['G4'].alignment = center_align
+
+    ws['C5'] = f"Tel: {tel}"
+    ws['C5'].font = normal_font
+    ws['C5'].alignment = center_align
+
+    ws['D5'] = '최대 적설량'
+    ws['D5'].font = normal_font
+    ws['D5'].alignment = center_align
+
+    ws['E5'] = matrix_max_snow or ''
+    ws['E5'].font = normal_font
+    ws['E5'].alignment = center_align
+
+    ws['F5'] = '전체 발전량'
+    ws['F5'].font = normal_font
+    ws['F5'].alignment = center_align
+
+    if matrix_output_wp:
+        ws['G5'] = f"{matrix_output_wp} Wp"
+    else:
+        ws['G5'] = ''
+    ws['G5'].font = normal_font
+    ws['G5'].alignment = center_align
+
+    ws['C6'] = f"Fax: {fax}"
+    ws['C6'].font = normal_font
+    ws['C6'].alignment = center_align
+
+    ws.merge_cells('D6:E6')
+    ws['D6'] = ''
+    ws['D6'].font = normal_font
+    ws['D6'].alignment = center_align
+
+    if span_info:
+        ws['G6'] = f"{span_info} mm"
+    else:
+        ws['G6'] = ''
+    ws['G6'].font = normal_font
+    ws['G6'].alignment = center_align
+
+    ws['F6'] = '경간(E/W)'
+    ws['F6'].font = normal_font
+    ws['F6'].alignment = center_align
+
+    # ========== 新增：填写板规到 G3 ==========
+    if matrix_module_size:
+        panel_spec = matrix_module_size
+    else:
+        panel_spec = config.get('panel_spec', '') if config else ''
+    ws['G3'] = panel_spec
+    ws['G3'].font = normal_font
+    ws['G3'].alignment = center_align
+
+    ws['C7'] = '배열'
+    ws['C7'].font = normal_font
+    ws['C7'].alignment = center_align
+
+    ws.merge_cells('A7:B7')
+    ws['A7'] = '서측'
+    ws['A7'].font = a7_font
+    ws['A7'].alignment = center_align
+    ws['A7'].fill = a7_fill
+
+    if rows is not None:
+        ws['D7'] = f"{rows} 행"
+    else:
+        ws['D7'] = ''
+    if cols is not None:
+        ws['E7'] = f"{cols} 열"
+    else:
+        ws['E7'] = ''
+    ws['D7'].alignment = center_align
+    ws['E7'].alignment = center_align
+    ws['D7'].font = normal_font
+    ws['E7'].font = normal_font
+
+    ws['F7'] = '어레이'
+    ws['F7'].font = normal_font
+    ws['F7'].alignment = center_align
+
+    if matrix_set_count:
+        ws['G7'] = matrix_set_count
+    else:
+        ws['G7'] = ''
+    ws['G7'].font = normal_font
+    ws['G7'].alignment = center_align
+
+    ws.merge_cells('H3:J7')
+    ws['H3'] = '품질보증: 10년\n사용수명: 25년'
+    ws['H3'].font = normal_font
+    ws['H3'].alignment = center_align
+
+    # ========== 合并 A8:J8 单元格 ==========
+    ws.merge_cells('A8:J8')
+
+    for col in range(1, 11):
+        cell = ws.cell(row=8, column=col)
+        cell.alignment = center_align
+        cell.font = normal_font
+
+    headers = [
+        ('번호\nItem No.', 'A'), ('상품명\nProduct Name', 'B'), ('제조 재료\nMaterial', 'C'),
+        ('사진\nPicture', 'D'), ('규격\nSpec.', 'E'), ('단가\nUnit Price (US$)\nEX Works', 'F'),
+        ('수량\nQTY (PCS)', 'G'), ('총가격\nTotal Price (US$)\nEX Works', 'H'),
+        ('무게\nWeight(KG)', 'I'), ('제품코드\nRemark', 'J')
+    ]
+    for text, col in headers:
+        cell = ws[f'{col}9']
+        cell.value = text
+        cell.font = header_font
+        cell.alignment = center_align
+
+    # ========== 填入所有产品数据，并匹配价格（单位从价格表获取）==========
+    total_weight_sum = Decimal('0')
+    total_price_sum = Decimal('0')
+    matched_count = 0
+    unmatched_count = 0
+    unmatched_codes = []
+    meter_unit_count = 0  # 统计按米计价的产品数量
+    piece_unit_count = 0  # 统计按个计价的产品数量
+    length_extract_fail_count = 0  # 统计长度提取失败的数量
+    image_found_count = 0  # 统计找到图片的数量
+    image_not_found_count = 0  # 统计未找到图片的数量
+
+    # 收集未匹配的产品信息（用于生成询价表）
+    local_unmatched_products = []
+    row_product_map = {}
+    row_price_info_map = {}
+    row_issue_map = {}
+    weight_log_buffer = []
+
+    def register_issue(row_number, product_data, price_data, reason):
+        if not reason:
+            return
+
+        issue_item = row_issue_map.get(row_number)
+        if issue_item is None:
+            display_name = (
+                (price_data or {}).get('name')
+                or product_data.get('name', '')
+            )
+
+            issue_item = {
+                'code': product_data.get('code', ''),
+                'name': display_name,
+                'spec': product_data.get('spec', ''),
+                'quantity': product_data.get('quantity', 0),
+                'unit': price_data.get('unit', '') if price_data else '',
+                'reasons': [],
+                'needs_inquiry': False,
+            }
+            row_issue_map[row_number] = issue_item
+
+        if reason not in issue_item['reasons']:
+            issue_item['reasons'].append(reason)
+
+        if price_data is None or not has_valid_price_info(price_data):
+            issue_item['needs_inquiry'] = True
+
+    name_field = {
+        '英语组': 'name_en',
+        '日语组': 'name_ja',
+    }.get(group or '', 'name_ko')
+
+    for idx, product in enumerate(all_products):
+        row = data_start_row + idx
+        product_code = product['code']
+        price_info = resolve_price_info(price_mapping, product_code)
+        display_name = (
+            price_info.get(name_field)
+            or price_info.get('name_ko')
+            or price_info.get('name')
+            or product['name']
+        ) if price_info else product['name']
+
+        row_product_map[row] = product
+        row_price_info_map[row] = price_info
+
+        ws.cell(row=row, column=1, value=product['seq'])
+        ws.cell(row=row, column=2, value=display_name)
+        ws.cell(row=row, column=3, value=product['material'])
+        ws.cell(row=row, column=4, value="")
+        ws.cell(row=row, column=5, value=product['spec'])
+
+        # ========== 匹配价格（包含单位信息）==========
+        # product_code and price_info were resolved above
+        unit_price = 0
+        price_unit = ''  # 从价格表获取的单位
+        is_matched = False  # 标记是否匹配到价格
+
+        if price_info and has_valid_price_info(price_info):
+            unit_price = float(price_info['price'])
+            price_unit = price_info.get('unit', '')  # 从价格表获取单位
+            matched_count += 1
+            is_matched = True
+        else:
+            unmatched_count += 1
+            if product_code:
+                unmatched_codes.append(product_code)
+            unit_price = 0
+            price_unit = ''
+            is_matched = False
+            # 收集未匹配的产品信息
+            if price_info:
+                register_issue(row, product, price_info, price_info.get('issue_reason') or '数据库缺少价格')
+                price_unit = price_info.get('unit', '')
+            else:
+                register_issue(row, product, None, '数据库无匹配')
+
+        # 设置单价（第6列）
+        if price_info and price_info.get('image_status') == 'missing':
+            register_issue(row, product, price_info, '数据库缺少图片')
+        elif price_info and price_info.get('image_status') == 'invalid':
+            register_issue(row, product, price_info, '图片数据无效')
+
+        if unit_price > 0:
+            ws.cell(row=row, column=6, value=float(unit_price))
+            ws.cell(row=row, column=6).number_format = currency_number_format
+        else:
+            ws.cell(row=row, column=6, value="")
+
+        # 数量（第7列）
+        quantity = product['quantity']
+        if quantity > 0:
+            ws.cell(row=row, column=7,
+                    value=int(quantity) if quantity % 1 == 0 else quantity)
+        else:
+            ws.cell(row=row, column=7, value="")
+
+        # ========== 根据价格表的单位计算总价 ==========
+        total_price = Decimal('0')
+
+        if unit_price > 0 and quantity > 0:
+            # 判断计价单位：优先使用价格表的单位
+            is_meter = False
+            if price_unit in ['米', 'm', 'M', 'meter', 'Meter', 'METERS', 'meters']:
+                is_meter = True
+
+            if is_meter:
+                # 米计价：从规格中提取长度
+                length_mm = extract_length_from_spec(product['spec'])
+
+                if length_mm is not None and length_mm > 0:
+                    # 总价 = (长度 / 1000) × 单价 × 数量
+                    length_m = Decimal(str(length_mm)) / Decimal('1000')
+                    total_price = Decimal(str(unit_price)) * length_m * Decimal(str(quantity))
+                    meter_unit_count += 1
+                else:
+                    # 无法提取长度，按个计价（降级处理）
+                    total_price = Decimal(str(unit_price)) * Decimal(str(quantity))
+                    length_extract_fail_count += 1
+                    print(
+                        f"   ⚠️ 米计价产品但无法提取长度: {product['name']} (编码: {product_code}, 规格: {product['spec']})，按个计价")
+            else:
+                # 个/套计价
+                total_price = Decimal(str(unit_price)) * Decimal(str(quantity))
+                piece_unit_count += 1
+
+            total_price_rounded = round_to_2_decimal(total_price)
+            ws.cell(row=row, column=8, value=float(total_price_rounded))
+            ws.cell(row=row, column=8).number_format = currency_number_format
+            total_price_sum += total_price_rounded
+        else:
+            ws.cell(row=row, column=8, value="")
+
+        # 重量（第9列）
+        weight_cell = ws.cell(row=row, column=9)
+        total_weight, weight_has_unit, weight_unit = calculate_report_total_weight(
+            product,
+            quantity,
+            price_info,
+            row_number=row,
+            log_buffer=weight_log_buffer,
+        )
+
+        if total_weight is not None and total_weight > 0:
+            total_weight_rounded = round_to_2_decimal(total_weight)
+
+            if weight_has_unit:
+                weight_cell.value = f"{float(total_weight_rounded)} {weight_unit}"
+                weight_cell.alignment = left_align
+            else:
+                weight_cell.value = float(total_weight_rounded)
+                weight_cell.number_format = numbers.FORMAT_NUMBER_00
+                weight_cell.alignment = center_align
+
+            total_weight_sum += total_weight
+        else:
+            weight_cell.value = ""
+            weight_cell.alignment = center_align
+
+        # 产品编码（第10列）
+        ws.cell(row=row, column=10, value=product['code'])
+
+        # 设置对齐和字体
+        for col in [1, 2, 3, 4, 5, 6, 7, 8, 10]:
+            cell = ws.cell(row=row, column=col)
+            cell.alignment = center_align
+            cell.font = normal_font
+        weight_cell.font = normal_font
+
+        # ========== 为未匹配价格的行添加黄色背景 ==========
+        if not is_matched:
+            for col in range(1, 11):  # A-J列
+                cell = ws.cell(row=row, column=col)
+                cell.fill = yellow_fill
+
+    # 图片检查完成后再统一汇总问题项
+
+    if weight_log_buffer:
+        print(f"[WEIGHT] sheet={sheet_name} rows={len(weight_log_buffer)}")
+        print('\n'.join(weight_log_buffer))
+
+    # 打印价格匹配统计
+    print(f"   💰 价格匹配统计: 成功 {matched_count} 项, 失败 {unmatched_count} 项")
+    print(f"   📏 计价单位统计: 米计价 {meter_unit_count} 项, 个/套计价 {piece_unit_count} 项")
+    if length_extract_fail_count > 0:
+        print(f"   ⚠️ 长度提取失败 {length_extract_fail_count} 项 (已按个计价)")
+    if unmatched_codes:
+        print(f"   ⚠️ 未匹配的编码: {unmatched_codes[:10]}{'...' if len(unmatched_codes) > 10 else ''}")
+
+    # ========== 删除重量为空的行并重新编号 ==========
+    last_data_row = delete_empty_weight_rows_and_renumber(ws, data_start_row)
+
+    # ========== 删除行后再插入图片，避免错位 ==========
+    def mark_missing_image(row_number):
+        image_cell = ws.cell(row=row_number, column=IMAGE_COLUMN_INDEX)
+        image_cell.value = "/"
+        image_cell.alignment = center_align
+        image_cell.font = normal_font
+
+    for row in range(data_start_row, last_data_row + 1):
+        product_code = ws.cell(row=row, column=10).value
+        if product_code is None or str(product_code).strip() == '':
+            continue
+        product_code = str(product_code).strip()
+        normalized_code = normalize_lookup_code(product_code)
+        price_info_for_row = row_price_info_map.get(row)
+
+        img_path = None
+        if image_folder and code_to_images and product_code in code_to_images and code_to_images[product_code]:
+            img_path = code_to_images[product_code][0]
+        elif image_folder and code_to_images and normalized_code in code_to_images and code_to_images[normalized_code]:
+            img_path = code_to_images[normalized_code][0]
+
+        if img_path:
+            temp_img_path = prepare_image_for_excel(
+                img_path,
+                target_width=IMAGE_WIDTH,
+                target_height=IMAGE_HEIGHT,
+                temp_dir=image_temp_dir,
+                cache=image_cache
+            )
+            final_img_path = temp_img_path if temp_img_path else img_path
+            success = add_image_centered_in_cell(
+                ws,
+                final_img_path,
+                row,
+                IMAGE_COLUMN_INDEX,
+                img_width=IMAGE_WIDTH,
+                img_height=IMAGE_HEIGHT
+            )
+            if success:
+                image_found_count += 1
+                if ws.row_dimensions[row].height < IMAGE_HEIGHT:
+                    ws.row_dimensions[row].height = IMAGE_HEIGHT
+                print(f"   🖼️ 找到图片: {product_code} -> {os.path.basename(img_path)}")
+                continue
+
+            image_not_found_count += 1
+            mark_missing_image(row)
+            if price_info_for_row and price_info_for_row.get('image_status') == 'ready':
+                register_issue(row, row_product_map.get(row, {}), price_info_for_row, '数据库图片未落盘')
+            continue
+
+        image_not_found_count += 1
+        mark_missing_image(row)
+        if price_info_for_row and price_info_for_row.get('image_status') == 'ready':
+            register_issue(row, row_product_map.get(row, {}), price_info_for_row, '数据库图片未落盘')
+        if image_not_found_count <= 5:
+            print(f"   ⚠️ 未找到图片: {product_code}")
+
+    print(f"   🖼️ 图片统计: 成功插入 {image_found_count} 张, 未找到 {image_not_found_count} 张")
+
+    local_unmatched_products = []
+    for issue_item in row_issue_map.values():
+        reasons = issue_item.pop('reasons', [])
+        needs_inquiry = bool(issue_item.pop('needs_inquiry', False))
+        issue_item['issue_reason'] = '铝价数据库无法匹配'
+        if needs_inquiry:
+            local_unmatched_products.append(issue_item)
+
+    if unmatched_products_list is not None:
+        unmatched_products_list.extend(local_unmatched_products)
+
+    # 重新计算有效产品数量
+    valid_product_count = 0
+    current_row = data_start_row
+    while current_row <= last_data_row:
+        name_cell = ws.cell(row=current_row, column=2)
+        if name_cell.value and name_cell.value != '':
+            valid_product_count += 1
+        current_row += 1
+
+    # 重新计算总重量和总价格
+    total_weight_sum = Decimal('0')
+    total_price_sum = Decimal('0')
+    current_row = data_start_row
+    while current_row <= last_data_row:
+        price_cell = ws.cell(row=current_row, column=8)
+        weight_cell = ws.cell(row=current_row, column=9)
+
+        if price_cell.value and price_cell.value != '':
+            try:
+                total_price_sum += Decimal(str(price_cell.value))
+            except:
+                pass
+
+        weight_value = weight_cell.value
+        if weight_value and weight_value != '' and weight_value != 0:
+            if isinstance(weight_value, str):
+                try:
+                    match = re.search(r'(\d+(?:\.\d+)?)', weight_value)
+                    if match:
+                        total_weight_sum += Decimal(match.group(1))
+                except:
+                    pass
+            else:
+                total_weight_sum += Decimal(str(weight_value))
+        current_row += 1
+
+    total_weight_sum_rounded = round_to_2_decimal(total_weight_sum)
+    total_price_sum_rounded = round_to_2_decimal(total_price_sum)
+    total_row_weight_sum_rounded = total_weight_sum_rounded
+    total_row_price_sum_rounded = total_price_sum_rounded
+    total_amount_label = f'TOTAL AMOUNT OF {total_table_count} TABLES'
+
+    if matrix_set_count:
+        multiplier = Decimal(str(matrix_set_count))
+        total_row_weight_sum_rounded = round_to_2_decimal(total_weight_sum * multiplier)
+        total_row_price_sum_rounded = round_to_2_decimal(total_price_sum * multiplier)
+
+    # ========== 计算小计和总计行的位置 ==========
+    new_data_end_row = last_data_row
+    subtotal_row_1 = new_data_end_row + 1
+    total_row_1 = subtotal_row_1 + 1
+    note_row = total_row_1 + 1
+    extra_row = note_row + 1
+
+    ws.row_dimensions[subtotal_row_1].height = 40
+    ws.row_dimensions[total_row_1].height = 40
+    ws.row_dimensions[note_row].height = 28
+    ws.row_dimensions[extra_row].height = 61
+
+    for col in range(1, 11):
+        cell = ws.cell(row=extra_row, column=col)
+        cell.alignment = center_align
+        cell.font = normal_font
+
+    extra_subtotal_row = extra_row + 1
+    extra_total_row = extra_row + 2
+
+    ws.row_dimensions[extra_subtotal_row].height = 40
+    ws.row_dimensions[extra_total_row].height = 40
+
+    # ========== 第一个小计和总计 ==========
+    ws.merge_cells(f'A{subtotal_row_1}:G{subtotal_row_1}')
+    ws[f'A{subtotal_row_1}'] = 'SUB-TOTAL AMOUNT/TABLE'
+    ws[f'A{subtotal_row_1}'].font = small_bold_font
+    ws[f'A{subtotal_row_1}'].alignment = right_align
+
+    if total_price_sum_rounded > 0:
+        ws[f'H{subtotal_row_1}'] = float(total_price_sum_rounded)
+        ws[f'H{subtotal_row_1}'].number_format = currency_number_format
+    else:
+        ws[f'H{subtotal_row_1}'] = ""
+
+    if total_weight_sum_rounded > 0:
+        ws[f'I{subtotal_row_1}'] = float(total_weight_sum_rounded)
+        ws[f'I{subtotal_row_1}'].number_format = numbers.FORMAT_NUMBER_00
+    else:
+        ws[f'I{subtotal_row_1}'] = ""
+
+    ws[f'J{subtotal_row_1}'] = 'KG'
+    ws[f'J{subtotal_row_1}'].font = small_bold_font
+    ws[f'J{subtotal_row_1}'].alignment = left_align
+    ws[f'H{subtotal_row_1}'].font = small_bold_font
+    ws[f'H{subtotal_row_1}'].alignment = center_align
+    ws[f'I{subtotal_row_1}'].font = small_bold_font
+    ws[f'I{subtotal_row_1}'].alignment = center_align
+
+    ws.merge_cells(f'A{total_row_1}:G{total_row_1}')
+    ws[f'A{total_row_1}'] = total_amount_label
+    ws[f'A{total_row_1}'].font = small_bold_font
+    ws[f'A{total_row_1}'].alignment = right_align
+
+    if total_row_price_sum_rounded > 0:
+        ws[f'H{total_row_1}'] = float(total_row_price_sum_rounded)
+        ws[f'H{total_row_1}'].number_format = currency_number_format
+    else:
+        ws[f'H{total_row_1}'] = ""
+
+    if total_row_weight_sum_rounded > 0:
+        ws[f'I{total_row_1}'] = float(total_row_weight_sum_rounded)
+        ws[f'I{total_row_1}'].number_format = numbers.FORMAT_NUMBER_00
+    else:
+        ws[f'I{total_row_1}'] = ""
+
+    ws[f'J{total_row_1}'] = 'KG'
+    ws[f'J{total_row_1}'].font = small_bold_font
+    ws[f'J{total_row_1}'].alignment = left_align
+    ws[f'H{total_row_1}'].font = small_bold_font
+    ws[f'H{total_row_1}'].alignment = center_align
+    ws[f'I{total_row_1}'].font = small_bold_font
+    ws[f'I{total_row_1}'].alignment = center_align
+
+    # ========== 附加说明行 ==========
+    ws.merge_cells(f'A{note_row}:J{note_row}')
+    ws[f'A{note_row}'] = '아래 제품은 견적서에 미포함입니다. 필요시 추가 주문 가능합니다.'
+    ws[f'A{note_row}'].font = red_small_font
+    ws[f'A{note_row}'].alignment = left_align
+
+    # ========== 附加产品小计和总计 ==========
+    ws.merge_cells(f'A{extra_subtotal_row}:G{extra_subtotal_row}')
+    ws[f'A{extra_subtotal_row}'] = 'SUB-TOTAL AMOUNT/TABLE'
+    ws[f'A{extra_subtotal_row}'].font = small_bold_font
+    ws[f'A{extra_subtotal_row}'].alignment = right_align
+    ws[f'H{extra_subtotal_row}'] = ""
+    ws[f'I{extra_subtotal_row}'] = ""
+    ws[f'J{extra_subtotal_row}'] = 'KG'
+    ws[f'J{extra_subtotal_row}'].font = small_bold_font
+    ws[f'J{extra_subtotal_row}'].alignment = left_align
+
+    ws.merge_cells(f'A{extra_total_row}:G{extra_total_row}')
+    ws[f'A{extra_total_row}'] = total_amount_label
+    ws[f'A{extra_total_row}'].font = small_bold_font
+    ws[f'A{extra_total_row}'].alignment = right_align
+    ws[f'H{extra_total_row}'] = ""
+    ws[f'I{extra_total_row}'] = ""
+    ws[f'J{extra_total_row}'] = 'KG'
+    ws[f'J{extra_total_row}'].font = small_bold_font
+    ws[f'J{extra_total_row}'].alignment = left_align
+
+    # ========== 统一设置边框 ==========
+    for row in range(2, extra_total_row + 1):
+        for col in range(1, 11):
+            cell = ws.cell(row=row, column=col)
+            cell.border = thin_border
+
+    for col in range(1, 11):
+        cell = ws.cell(row=2, column=col)
+        current_border = cell.border
+        cell.border = Border(
+            left=current_border.left,
+            right=current_border.right,
+            top=thick,
+            bottom=current_border.bottom
+        )
+
+    for col in range(1, 11):
+        cell = ws.cell(row=extra_total_row, column=col)
+        current_border = cell.border
+        cell.border = Border(
+            left=current_border.left,
+            right=current_border.right,
+            top=current_border.top,
+            bottom=thick
+        )
+
+    for row in range(2, extra_total_row + 1):
+        cell = ws.cell(row=row, column=1)
+        current_border = cell.border
+        cell.border = Border(
+            left=thick,
+            right=current_border.right,
+            top=current_border.top,
+            bottom=current_border.bottom
+        )
+
+    for row in range(2, extra_total_row + 1):
+        cell = ws.cell(row=row, column=10)
+        current_border = cell.border
+        cell.border = Border(
+            left=current_border.left,
+            right=thick,
+            top=current_border.top,
+            bottom=current_border.bottom
+        )
+
+    ws['A2'].border = Border(left=thick, top=thick, right=thin, bottom=thin)
+    for col in range(2, 10):
+        cell = ws.cell(row=2, column=col)
+        cell.border = Border(left=thin, top=thick, right=thin, bottom=thin)
+    ws['J2'].border = Border(left=thin, top=thick, right=thick, bottom=thin)
+
+    ws['A7'].border = thin_border
+    ws['B7'].border = thin_border
+    ws['D7'].border = thin_border
+    ws['E7'].border = thin_border
+    ws['G6'].border = thin_border
+
+    for col in range(1, 11):
+        ws.cell(row=1, column=col).border = no_border
+
+    # ========== 页面设置 ==========
+    ws.page_setup.orientation = 'landscape'
+    ws.page_setup.paperSize = 9
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins = PageMargins(top=0.5, bottom=0.5, left=0.3, right=0.3, header=0.1, footer=0.1)
+
+    return {
+        'sheet_name': sheet_name,
+        'valid_products': valid_product_count,
+        'total_weight': float(total_row_weight_sum_rounded),
+        'total_price': float(total_row_price_sum_rounded),
+        'matched_count': matched_count,
+        'unmatched_count': unmatched_count,
+        'meter_unit_count': meter_unit_count,
+        'piece_unit_count': piece_unit_count,
+        'length_extract_fail_count': length_extract_fail_count,
+        'unmatched_products_count': len(local_unmatched_products),
+        'image_found_count': image_found_count,
+        'image_not_found_count': image_not_found_count
+    }
+
+
+CONFIG_FIELD_RULES = {
+    'array': {
+        'anchors': ['阵列'],
+        'mode': 'two_numbers',
+        'window_cols': 6,
+        'stop_labels': ['缺板数', '是否东西可调', '基础类型', '阵列基数'],
+        'ranges': [(1, 200), (1, 200)],
+    },
+    'panel_spec': {
+        'anchors': ['板规'],
+        'mode': 'three_numbers',
+        'window_cols': 8,
+        'stop_labels': ['是否东西可调', '阵列', '架台类型'],
+        'ranges': [(100, 4000), (100, 4000), (1, 200)],
+    },
+    'cross_span': {
+        'anchors': ['跨距'],
+        'fallback_anchors': ['导轨伸出面板长度'],
+        'mode': 'one_number',
+        'window_cols': 8,
+        'stop_labels': ['基础类型', '单基侧压总数', '阵列基数', '标准定价', '切法辅助'],
+        'ranges': [(500, 20000)],
+        'pick': 'last',
+    },
+    'angle': {
+        'anchors': ['角度'],
+        'mode': 'one_number',
+        'window_cols': 4,
+        'stop_labels': ['导轨总长', '东西板间距'],
+        'ranges': [(0, 90)],
+        'pick': 'first',
+    },
+    'layout': {
+        'anchors': ['布板方式'],
+        'mode': 'text',
+        'window_cols': 3,
+        'stop_labels': ['板规'],
+        'allowed_values': ['横放', '竖放'],
+    },
+    'adjustable': {
+        'anchors': ['是否东西可调'],
+        'mode': 'text',
+        'window_cols': 3,
+        'stop_labels': ['导轨伸出面板长度', '标准定价'],
+        'allowed_values': ['是', '否'],
+    },
+    'extension': {
+        'anchors': ['导轨伸出面板长度'],
+        'mode': 'one_number',
+        'window_cols': 6,
+        'stop_labels': ['基础类型', '单基侧压总数', '阵列基数', '标准定价'],
+        'ranges': [(-500, 500)],
+        'pick': 'first',
+    },
+}
+
+HEADER_FIELD_RULES = {
+    '编码': {
+        'include': ['编码', 'partno', '编号', 'code', '物料编码'],
+    },
+    '名称': {
+        'include': ['名称', 'partname', '品名', 'description', '物料名称'],
+    },
+    '规格': {
+        'include': ['规格', 'spec', '尺寸', 'size', '型号'],
+    },
+    '材质': {
+        'include': ['材质', 'material', '材料'],
+    },
+    '数量': {
+        'include': ['数量', 'qty', 'quantity', '个数'],
+        'prefer': ['单基数量', '单基qty', '单基quantity'],
+        'exclude': ['多基数量', '多基qty', '多基quantity'],
+    },
+    '单重': {
+        'include': ['单重', 'weight', '重量', 'kg'],
+    },
+    '备注': {
+        'include': ['备注', 'remark', 'notes'],
+    },
+}
+
+
+def normalize_excel_cell_text(value):
+    if pd.isna(value):
+        return ''
+
+    text = str(value).replace('\r', ' ').replace('\n', ' ').strip()
+    if not text or text.lower() == 'nan':
+        return ''
+    return text
+
+
+def normalize_lookup_token(text):
+    normalized = normalize_excel_cell_text(text)
+    compact = (
+        normalized
+        .replace('：', ':')
+        .replace('（', '(')
+        .replace('）', ')')
+        .replace('×', 'x')
+        .replace('*', 'x')
+    )
+    compact = re.sub(r'\s+', '', compact).lower()
+    return re.sub(r'[^0-9a-z\u4e00-\u9fff]+', '', compact)
+
+
+def format_number_text(number_text):
+    try:
+        value = float(number_text)
+    except (TypeError, ValueError):
+        return str(number_text).strip()
+
+    if value.is_integer():
+        return str(int(value))
+    return str(number_text).rstrip('0').rstrip('.')
+
+
+def parse_numeric_cell_text(text):
+    normalized = normalize_excel_cell_text(text).replace(',', '').replace('㎜', 'mm')
+    if not normalized:
+        return None
+
+    match = re.fullmatch(r'(-?\d+(?:\.\d+)?)\s*(?:mm|MM)?', normalized)
+    if not match:
+        return None
+    return format_number_text(match.group(1))
+
+
+def build_config_region(df, start_row, total_rows, max_rows=12, max_cols=20):
+    row_limit = min(start_row + max_rows, total_rows)
+    col_limit = min(df.shape[1], max_cols)
+    return [
+        (
+            row_idx,
+            [normalize_excel_cell_text(df.iat[row_idx, col_idx]) for col_idx in range(col_limit)],
+        )
+        for row_idx in range(start_row, row_limit)
+    ]
+
+
+def find_anchor_positions(config_rows, anchors):
+    matches = []
+    if not anchors:
+        return matches
+
+    for row_idx, cells in config_rows:
+        for col_idx, cell_text in enumerate(cells):
+            if cell_text and any(anchor in cell_text for anchor in anchors):
+                matches.append((row_idx, col_idx))
+    return matches
+
+
+def collect_text_candidates(row_cells, start_col, window_cols=6, stop_labels=None):
+    stop_labels = stop_labels or []
+    candidates = []
+
+    for col_idx in range(start_col + 1, min(len(row_cells), start_col + 1 + window_cols)):
+        cell_text = row_cells[col_idx]
+        if not cell_text:
+            continue
+        if any(label in cell_text for label in stop_labels):
+            break
+        if cell_text in {'x', 'X', '×', '*'}:
+            continue
+        candidates.append(cell_text)
+
+    return candidates
+
+
+def collect_numeric_candidates(row_cells, start_col, window_cols=6, stop_labels=None):
+    stop_labels = stop_labels or []
+    candidates = []
+
+    for col_idx in range(start_col + 1, min(len(row_cells), start_col + 1 + window_cols)):
+        cell_text = row_cells[col_idx]
+        if not cell_text:
+            continue
+        if any(label in cell_text for label in stop_labels):
+            break
+
+        number_text = parse_numeric_cell_text(cell_text)
+        if number_text is not None:
+            candidates.append(number_text)
+
+    return candidates
+
+
+def validate_numeric_candidates(candidates, ranges):
+    if not candidates:
+        return []
+
+    validated = []
+    for number_text in candidates:
+        try:
+            value = float(number_text)
+        except (TypeError, ValueError):
+            continue
+
+        index = len(validated)
+        if index < len(ranges):
+            min_value, max_value = ranges[index]
+            if value < min_value or value > max_value:
+                continue
+
+        validated.append((format_number_text(number_text), value))
+        if len(validated) >= len(ranges):
+            break
+
+    return validated
+
+
+def build_field_value_from_rule(candidates, rule):
+    mode = rule.get('mode')
+
+    if mode == 'text':
+        allowed_values = rule.get('allowed_values') or []
+        for text in candidates:
+            cleaned = normalize_excel_cell_text(text)
+            if not cleaned:
+                continue
+            if allowed_values and cleaned not in allowed_values:
+                continue
+            return cleaned
+        return ''
+
+    validated = validate_numeric_candidates(candidates, rule.get('ranges') or [])
+    if not validated:
+        return ''
+
+    if mode == 'one_number':
+        choice = validated[-1] if rule.get('pick') == 'last' else validated[0]
+        return choice[0]
+
+    if mode == 'two_numbers' and len(validated) >= 2:
+        return f'{validated[0][0]}×{validated[1][0]}'
+
+    if mode == 'three_numbers' and len(validated) >= 3:
+        return f'{validated[0][0]}*{validated[1][0]}*{validated[2][0]}mm'
+
+    return ''
+
+
+def extract_config_value(config_rows, rule):
+    row_map = {row_idx: cells for row_idx, cells in config_rows}
+
+    for anchor_key in ('anchors', 'fallback_anchors'):
+        anchor_positions = find_anchor_positions(config_rows, rule.get(anchor_key) or [])
+        for row_idx, col_idx in anchor_positions:
+            row_cells = row_map.get(row_idx, [])
+            if rule.get('mode') == 'text':
+                candidates = collect_text_candidates(
+                    row_cells,
+                    col_idx,
+                    window_cols=rule.get('window_cols', 6),
+                    stop_labels=rule.get('stop_labels'),
+                )
+            else:
+                candidates = collect_numeric_candidates(
+                    row_cells,
+                    col_idx,
+                    window_cols=rule.get('window_cols', 6),
+                    stop_labels=rule.get('stop_labels'),
+                )
+
+            value = build_field_value_from_rule(candidates, rule)
+            if value:
+                return value
+
+    return ''
+
+
+def score_header_candidate(field_name, cell_text):
+    tokenized = normalize_lookup_token(cell_text)
+    if not tokenized:
+        return None
+
+    rule = HEADER_FIELD_RULES[field_name]
+    if any(keyword in tokenized for keyword in rule.get('exclude', [])):
+        return None
+
+    score = 0
+    if any(keyword in tokenized for keyword in rule.get('prefer', [])):
+        score += 100
+    if any(keyword in tokenized for keyword in rule.get('include', [])):
+        score += 10
+
+    if score <= 0:
+        return None
+    return score
+
+
+def find_header_mapping_for_row(row):
+    matched_headers = {}
+    best_scores = {}
+
+    for col_idx, cell in enumerate(row):
+        cell_text = normalize_excel_cell_text(cell)
+        if not cell_text:
+            continue
+
+        for field_name in HEADER_FIELD_RULES:
+            score = score_header_candidate(field_name, cell_text)
+            if score is None:
+                continue
+
+            if score > best_scores.get(field_name, -1):
+                best_scores[field_name] = score
+                matched_headers[field_name] = col_idx
+
+    return matched_headers
+
+
+def is_valid_header_mapping(mapping):
+    required = {'编码', '名称', '规格'}
+    return len(mapping) >= 3 and required.issubset(mapping.keys())
+
+
+def extract_config_info(df, start_row, total_rows):
+    """提取BOM表的配置信息（标签定位 + 字段规则 + 校验回退）"""
+    config = {
+        'array': '',
+        'variant': '标准',
+        'variant_detail': '',
+        'panel_spec': '',
+        'cross_span': '',
+        'angle': '',
+        'layout': '',
+        'header_row': None,
+        'data_start_row': None,
+        'column_mapping': {},
+    }
+
+    config_rows = build_config_region(df, start_row, total_rows)
+    config['array'] = extract_config_value(config_rows, CONFIG_FIELD_RULES['array'])
+    config['panel_spec'] = extract_config_value(config_rows, CONFIG_FIELD_RULES['panel_spec'])
+    config['cross_span'] = extract_config_value(config_rows, CONFIG_FIELD_RULES['cross_span'])
+    config['angle'] = extract_config_value(config_rows, CONFIG_FIELD_RULES['angle'])
+    config['layout'] = extract_config_value(config_rows, CONFIG_FIELD_RULES['layout'])
+
+    adjustable = extract_config_value(config_rows, CONFIG_FIELD_RULES['adjustable'])
+    if adjustable:
+        config['variant'] = '可调' if adjustable == '是' else '固定'
+
+    extension_length = extract_config_value(config_rows, CONFIG_FIELD_RULES['extension'])
+    if extension_length:
+        config['variant_detail'] = f"伸出{extension_length}mm"
+
+    header_search_end = min(start_row + 60, total_rows)
+    for row_idx in range(start_row, header_search_end):
+        matched_headers = find_header_mapping_for_row(df.iloc[row_idx])
+        if is_valid_header_mapping(matched_headers):
+            config['header_row'] = row_idx
+            config['column_mapping'] = matched_headers
+            config['data_start_row'] = row_idx + 1
+            break
+
+    return config
+
+
+def extract_bom_dataframe(df, bom_info, index, all_bom_starts, total_rows, column_mapping, skip_keywords):
+    """提取单个BOM表的数据，返回DataFrame（使用智能化表头匹配）"""
+    start_row = bom_info['row']
+    config = bom_info['config']
+    array_info = config.get('array', '未知')
+    cross_span = config.get('cross_span', '')
+
+    # 使用配置中已经找到的表头信息
+    header_row = config.get('header_row')
+    header_mapping = config.get('column_mapping', {}).copy()
+    data_start_row = config.get('data_start_row')
+
+    # 确定结束行
+    if index < len(all_bom_starts):
+        end_row = all_bom_starts[index]['row'] - 1
+    else:
+        end_row = total_rows - 1
+        for j in range(start_row + 20, min(start_row + 500, total_rows)):
+            try:
+                row_str = ' '.join([str(x) if pd.notna(x) else '' for x in df.iloc[j]])
+                if '备注：' in row_str and '基数：' in row_str:
+                    end_row = min(j + 2, total_rows - 1)
+                    break
+                if '单基重量' in row_str or '多基重量' in row_str:
+                    end_row = min(j, total_rows - 1)
+                    break
+                if "BOM" in row_str and j > start_row + 5:
+                    end_row = j - 1
+                    break
+            except:
+                continue
+
+    # 如果没有找到表头，尝试动态查找
+    if header_row is None or not header_mapping:
+        search_start = start_row + 1
+        search_end = min(start_row + 30, end_row + 1, total_rows)
+
+        for j in range(search_start, search_end):
+            row = df.iloc[j]
+            temp_mapping = find_header_mapping_for_row(row)
+
+            if is_valid_header_mapping(temp_mapping):
+                header_row = j
+                header_mapping = temp_mapping
+                data_start_row = j + 1
+                break
+
+        # 如果还是没找到，使用默认位置
+        if not header_mapping:
+            header_mapping = {
+                '编码': 0,
+                '名称': 1,
+                '规格': 2,
+                '材质': 3,
+                '数量': 4,
+                '备注': 5,
+                '单重': 6
+            }
+            data_start_row = start_row + 7
+
+    # 如果没有数据开始行，从表头下一行开始
+    if data_start_row is None:
+        data_start_row = header_row + 1 if header_row else start_row + 7
+
+    # 标准化列映射（转换为标准名称）
+    normalized_mapping = {}
+    for field, col_idx in header_mapping.items():
+        # 将字段名映射到标准名称
+        if field in ['编码', 'Part No.', '编号', 'Code']:
+            standard_name = '编码'
+        elif field in ['名称', 'Part Name', '品名', 'Description']:
+            standard_name = '名称'
+        elif field in ['规格', 'Spec', '尺寸', 'Size']:
+            standard_name = '规格'
+        elif field in ['材质', 'Material', '材料']:
+            standard_name = '材质'
+        elif field in ['数量', 'Qty.', 'Quantity']:
+            standard_name = '数量'
+        elif field in ['单重', 'Weight', '重量', '(Kg)']:
+            standard_name = '单重'
+        elif field in ['备注', 'Remark', 'Notes']:
+            standard_name = '备注'
+        else:
+            standard_name = field
+
+        normalized_mapping[standard_name] = col_idx
+
+    # 提取物料数据
+    material_data = []
+
+    for j in range(data_start_row, min(end_row + 1, total_rows)):
+        try:
+            row = df.iloc[j]
+            row_str = ' '.join([str(x) if pd.notna(x) else '' for x in row])
+
+            # 跳过空行
+            non_empty = [str(x) for x in row if pd.notna(x) and str(x).strip() not in ['', 'nan', 'NaN']]
+            if len(non_empty) <= 1:
+                continue
+
+            # 跳过备注/汇总行
+            is_skip = any(keyword in row_str for keyword in skip_keywords)
+            if is_skip:
+                continue
+
+            # 构建产品数据
+            filtered_row = {}
+            for standard_col in ['编码', '名称', '规格', '材质', '数量', '备注', '单重']:
+                if standard_col in normalized_mapping:
+                    col_idx = normalized_mapping[standard_col]
+                    if col_idx < len(row):
+                        cell_value = row[col_idx] if pd.notna(row[col_idx]) else ''
+                        filtered_row[standard_col] = cell_value
+                    else:
+                        filtered_row[standard_col] = ''
+                else:
+                    filtered_row[standard_col] = ''
+
+            # 如果编码和名称都为空，跳过
+            if not filtered_row.get('编码') and not filtered_row.get('名称'):
+                continue
+
+            # 处理数量
+            if filtered_row.get('数量'):
+                try:
+                    qty_str = str(filtered_row['数量']).strip()
+                    # 移除可能的单位
+                    qty_str = re.sub(r'[^0-9\.\-]', '', qty_str)
+                    if qty_str:
+                        filtered_row['数量'] = float(qty_str) if '.' in qty_str else int(qty_str)
+                except:
+                    filtered_row['数量'] = 0
+
+            filtered_row['阵列'] = array_info
+            filtered_row['跨距'] = cross_span
+
+            material_data.append(filtered_row)
+        except Exception as e:
+            continue
+
+    if not material_data:
+        return None
+
+    df_result = pd.DataFrame(material_data)
+    df_result.insert(0, '序号', range(1, len(df_result) + 1))
+    return df_result
+
+def create_summary_quotation_sheet(workbook, all_quotation_results, matrix_data=None,
+                                   image_path=None, contact_info=None):
+    from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
+    from openpyxl.drawing.xdr import XDRPositiveSize2D
+    from datetime import datetime
+
+    ws = workbook.create_sheet(title='견적서')
+
+    malgun = Font(name='Malgun Gothic')
+    malgun_bold = Font(name='Malgun Gothic', bold=True)
+    malgun_bold_16 = Font(name='Malgun Gothic', bold=True, size=16)
+    malgun_small = Font(name='Malgun Gothic', size=8)
+    malgun_small_red = Font(name='Malgun Gothic', size=8, color='FF0000')
+
+    red_inline = InlineFont(rFont='Malgun Gothic', color='FF0000')
+    normal_inline = InlineFont(rFont='Malgun Gothic')
+
+    light_blue = PatternFill(start_color='DDEBF7', end_color='DDEBF7', fill_type='solid')
+    center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    left = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    right_a = Alignment(horizontal='right', vertical='center', wrap_text=True)
+
+    thin_side = Side(style='thin', color='000000')
+    thick_side = Side(style='medium', color='000000')
+    thin_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+
+    col_widths = {'A': 5, 'B': 5, 'C': 8, 'D': 5, 'E': 6,
+                  'F': 15.5, 'G': 13, 'H': 6, 'I': 6, 'J': 9.1, 'K': 9.1}
+    for col, width in col_widths.items():
+        ws.column_dimensions[col].width = width
+
+    matrix_data = matrix_data or {}
+    project_name = str(matrix_data.get('project_name') or '').strip()
+    output_kw = matrix_data.get('output_kw') or 0
+    array_rows = matrix_data.get('array_rows')
+    array_cols = matrix_data.get('array_cols')
+    set_count = matrix_data.get('set_count') or 1
+
+    # ========== Row 1 ==========
+    ws.merge_cells('A1:G1')
+    ws.row_dimensions[1].height = 70
+    if image_path and os.path.exists(image_path):
+        try:
+            img = XLImage(img=image_path)
+            original_width = img.width
+            original_height = img.height
+
+            merged_width = sum(col_widths.get(get_column_letter(c), 0) for c in range(1, 8))
+            cell_width_px = merged_width * 7.5
+            row1_height = ws.row_dimensions[1].height or 70
+            cell_height_px = row1_height * 1.33
+
+            target_scale = 0.6
+            target_w = int(original_width * target_scale)
+            target_h = int(original_height * target_scale)
+
+            margin = 10
+            max_w = cell_width_px - margin * 2
+            max_h = cell_height_px - margin * 2
+            if target_w > max_w or target_h > max_h:
+                scale_w = max_w / original_width if original_width > 0 else 1
+                scale_h = max_h / original_height if original_height > 0 else 1
+                fit_scale = min(scale_w, scale_h)
+                target_w = int(original_width * fit_scale)
+                target_h = int(original_height * fit_scale)
+
+            offset_x = max(0, (cell_width_px - target_w) / 2)
+            offset_y = max(0, (cell_height_px - target_h) / 2)
+
+            EMU_PER_PIXEL = 9525
+            marker = AnchorMarker(
+                col=0, colOff=int(offset_x * EMU_PER_PIXEL),
+                row=0, rowOff=int(offset_y * EMU_PER_PIXEL),
+            )
+            img.anchor = OneCellAnchor(
+                _from=marker,
+                ext=XDRPositiveSize2D(
+                    cx=int(target_w * EMU_PER_PIXEL),
+                    cy=int(target_h * EMU_PER_PIXEL),
+                ),
+            )
+            ws.add_image(img)
+        except Exception:
+            ws['A1'] = 'KSENG'
+            ws['A1'].font = malgun_bold_16
+            ws['A1'].alignment = center
+    else:
+        ws['A1'] = 'KSENG'
+        ws['A1'].font = malgun_bold_16
+        ws['A1'].alignment = center
+
+    ws.merge_cells('H1:I1')
+    ws['H1'] = '견적일：'
+    ws['H1'].alignment = center
+    ws['H1'].font = malgun
+
+    ws.merge_cells('J1:K1')
+    ws['J1'] = datetime.now().strftime('%Y/%m/%d')
+    ws['J1'].alignment = center
+    ws['J1'].font = malgun
+
+    # ========== Row 2: 标题 ==========
+    ws.merge_cells('A2:K2')
+    ws['A2'] = '태양광 지붕 시스템 견적서'
+    ws['A2'].font = malgun_bold_16
+    ws['A2'].alignment = center
+    ws['A2'].fill = light_blue
+    ws.row_dimensions[2].height = 30
+
+    # ========== Row 3-7: 项目信息 ==========
+    info_rows = [
+        (3, '프로젝트：\nProject Name:', project_name),
+        (4, '무역거래조건：\nPrice Term：', ''),
+        (5, '납기일：\nDelivery time：', '계약금 수금후 10~14일뒤 출고 가능합니다 (현장 상황에 따라 다소 변경될 수도 있습니다)'),
+        (6, '지불조건：\nPayment Term:', '계약서 체결후 30% 예약금 선불(T/T),나머지 70%요금 선적전 지불입니다.'),
+        (7, '유효기간：\nValidity Date:', '드린 요금은 1일간 유효하며, 1일후 요금 변동이 있을 수 있으니 재확인 부탁드립니다.')
+    ]
+    for row_num, label, value in info_rows:
+        ws.merge_cells(f'A{row_num}:C{row_num}')
+        ws[f'A{row_num}'] = label
+        ws[f'A{row_num}'].alignment = left
+        ws[f'A{row_num}'].font = malgun
+        ws.merge_cells(f'D{row_num}:K{row_num}')
+        ws[f'D{row_num}'] = value
+        ws[f'D{row_num}'].alignment = left
+        ws[f'D{row_num}'].font = malgun
+        ws.row_dimensions[row_num].height = 35
+
+    ws[f'D4'] = CellRichText(TextBlock(red_inline, 'CIF 부산'))
+    ws[f'D4'].alignment = left
+
+    # ========== Row 8: Part 1 ==========
+    ws.merge_cells('A8:K8')
+    ws['A8'] = 'Part 1:구조물 요금(Solar Mounting System)'
+    ws['A8'].font = malgun_bold
+    ws['A8'].alignment = left
+    ws.row_dimensions[8].height = 30
+
+    # ========== Row 9: 表头 ==========
+    headers = ['번호\nNo.', '행\nRow', '열\nColumn', '세트\nSet',
+               '각도\nAngle', '출력량(KW)\nOutput volume', '1세트요금\n(USD/Table)']
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=9, column=col_idx, value=header)
+        cell.alignment = center
+        cell.border = thin_border
+        cell.font = malgun
+
+    ws.merge_cells('H9:I9')
+    ws['H9'] = '합계(USD)\nprice'
+    ws['H9'].alignment = center
+    ws['H9'].border = thin_border
+    ws['H9'].font = malgun
+
+    ws.merge_cells('J9:K9')
+    ws['J9'] = '드리는 요금(USD)\nDiscounted price'
+    ws['J9'].alignment = center
+    ws['J9'].border = thin_border
+    ws['J9'].fill = light_blue
+    ws['J9'].font = malgun
+    ws.row_dimensions[9].height = 50
+
+    # ========== Row 10+: 每个BOM一行数据 ==========
+    data_start_row = 10
+    total_price_all = Decimal('0')
+
+    for i, qr in enumerate(all_quotation_results):
+        row_num = data_start_row + i
+        config = qr.get('config') or {}
+        angle_val = config.get('angle', '')
+        per_set_price = Decimal(str(qr.get('total_price', 0))) / Decimal(str(set_count))
+        total_price = Decimal(str(qr.get('total_price', 0)))
+        total_price_all += total_price
+
+        ws.cell(row=row_num, column=1, value=f'{i + 1}#').alignment = left
+        ws.cell(row=row_num, column=2, value=array_rows or '')
+        ws.cell(row=row_num, column=3, value=array_cols or '')
+        ws.cell(row=row_num, column=4, value=set_count)
+        ws.cell(row=row_num, column=5, value=angle_val or '')
+        ws.cell(row=row_num, column=6, value=output_kw)
+        ws.cell(row=row_num, column=7, value=round(float(per_set_price), 2))
+
+        ws.merge_cells(f'H{row_num}:I{row_num}')
+        ws.cell(row=row_num, column=8, value=round(float(total_price), 2))
+
+        ws.merge_cells(f'J{row_num}:K{row_num}')
+        ws.cell(row=row_num, column=10, value=round(float(total_price), 2))
+        ws.cell(row=row_num, column=10).fill = light_blue
+
+        for col in range(1, 12):
+            c = ws.cell(row=row_num, column=col)
+            c.border = thin_border
+            c.font = malgun
+            if not c.alignment or c.alignment.horizontal is None:
+                c.alignment = center
+        ws.row_dimensions[row_num].height = 30
+
+    data_end_row = data_start_row + len(all_quotation_results) - 1
+
+    # ========== 汇总行 ==========
+    summary_row_1 = data_end_row + 1  # 합계
+    summary_row_2 = data_end_row + 2  # 총 출력량
+    summary_row_3 = data_end_row + 3  # 1W당 비용
+
+    ws.merge_cells(f'A{summary_row_1}:I{summary_row_1}')
+    ws[f'A{summary_row_1}'] = '합계(USD)'
+    ws[f'A{summary_row_1}'].alignment = right_a
+    ws[f'A{summary_row_1}'].border = thin_border
+    ws[f'A{summary_row_1}'].font = malgun
+    ws.merge_cells(f'J{summary_row_1}:K{summary_row_1}')
+    ws.cell(row=summary_row_1, column=10, value=round(float(total_price_all), 2))
+    ws.cell(row=summary_row_1, column=10).border = thin_border
+    ws.cell(row=summary_row_1, column=10).font = malgun
+
+    ws.merge_cells(f'A{summary_row_2}:I{summary_row_2}')
+    ws[f'A{summary_row_2}'] = '총 출력량(KW)'
+    ws[f'A{summary_row_2}'].alignment = right_a
+    ws[f'A{summary_row_2}'].border = thin_border
+    ws[f'A{summary_row_2}'].font = malgun
+    ws.merge_cells(f'J{summary_row_2}:K{summary_row_2}')
+    ws.cell(row=summary_row_2, column=10, value=output_kw)
+    ws.cell(row=summary_row_2, column=10).border = thin_border
+    ws.cell(row=summary_row_2, column=10).font = malgun
+
+    cost_per_w = round(float(total_price_all) / (output_kw * 1000), 4) if output_kw > 0 else 0
+    ws.merge_cells(f'A{summary_row_3}:I{summary_row_3}')
+    ws[f'A{summary_row_3}'] = '1W당비용(USD)'
+    ws[f'A{summary_row_3}'].alignment = right_a
+    ws[f'A{summary_row_3}'].border = thin_border
+    ws[f'A{summary_row_3}'].font = malgun
+    ws.merge_cells(f'J{summary_row_3}:K{summary_row_3}')
+    ws.cell(row=summary_row_3, column=10, value=cost_per_w)
+    ws.cell(row=summary_row_3, column=10).border = thin_border
+    ws.cell(row=summary_row_3, column=10).font = malgun
+
+    for sr in [summary_row_1, summary_row_2, summary_row_3]:
+        ws.row_dimensions[sr].height = 30
+
+    # ========== Part 2: 运费 ==========
+    part2_row = summary_row_3 + 1
+    ws.merge_cells(f'A{part2_row}:K{part2_row}')
+    ws[f'A{part2_row}'] = 'Part 2: 운임비 (Freight Cost)'
+    ws[f'A{part2_row}'].font = malgun_bold
+    ws[f'A{part2_row}'].alignment = left
+    ws.row_dimensions[part2_row].height = 30
+
+    cif_row = part2_row + 1
+    ws.merge_cells(f'A{cif_row}:I{cif_row}')
+    ws[f'A{cif_row}'] = 'CIF부산(USD)'
+    ws[f'A{cif_row}'].alignment = right_a
+    ws[f'A{cif_row}'].border = thin_border
+    ws[f'A{cif_row}'].font = malgun
+    ws.merge_cells(f'J{cif_row}:K{cif_row}')
+    ws.cell(row=cif_row, column=10).border = thin_border
+    ws.cell(row=cif_row, column=10).font = malgun
+    ws.row_dimensions[cif_row].height = 30
+
+    note1_row = cif_row + 1
+    ws.merge_cells(f'A{note1_row}:K{note1_row}')
+    ws[f'A{note1_row}'] = '컨테이너 수량은 예측치입니다. 실제 수량은 발주 후 배치도 설계 완성 후에 확인 가능합니다.'
+    ws[f'A{note1_row}'].alignment = center
+    ws[f'A{note1_row}'].fill = light_blue
+    ws[f'A{note1_row}'].border = thin_border
+    ws[f'A{note1_row}'].font = malgun_small
+    ws.row_dimensions[note1_row].height = 15
+
+    container_row = note1_row + 1
+    ws.merge_cells(f'A{container_row}:E{container_row}')
+    ws[f'A{container_row}'] = '컨테이너 : 20피트/40피트/LCL'
+    ws[f'A{container_row}'].alignment = center
+    ws[f'A{container_row}'].font = malgun
+    ws.merge_cells(f'F{container_row}:H{container_row}')
+    ws[f'F{container_row}'] = '사용되는 수량'
+    ws[f'F{container_row}'].alignment = center
+    ws[f'F{container_row}'].font = malgun
+    ws.merge_cells(f'I{container_row}:K{container_row}')
+    ws[f'I{container_row}'] = 'LCL'
+    ws[f'I{container_row}'].alignment = center
+    ws[f'I{container_row}'].font = malgun
+    ws.row_dimensions[container_row].height = 30
+
+    total_all_row = container_row + 1
+    ws.merge_cells(f'A{total_all_row}:I{total_all_row}')
+    ws[f'A{total_all_row}'] = '토탈(USD)'
+    ws[f'A{total_all_row}'].alignment = right_a
+    ws[f'A{total_all_row}'].fill = light_blue
+    ws[f'A{total_all_row}'].font = malgun
+    ws.merge_cells(f'J{total_all_row}:K{total_all_row}')
+    ws.cell(row=total_all_row, column=10).fill = light_blue
+    ws.cell(row=total_all_row, column=10).font = malgun
+    ws.row_dimensions[total_all_row].height = 30
+
+    weight_row = total_all_row + 1
+    ws.merge_cells(f'A{weight_row}:K{weight_row}')
+    ws[f'A{weight_row}'] = '총무게 ~ kg'
+    ws[f'A{weight_row}'].alignment = center
+    ws[f'A{weight_row}'].font = malgun_small
+    ws.row_dimensions[weight_row].height = 15
+
+    hint_row = weight_row + 1
+    ws.merge_cells(f'A{hint_row}:K{hint_row}')
+    ws[f'A{hint_row}'] = '자세한 가격은 다음 시트에 확인해 주세요.'
+    ws[f'A{hint_row}'].alignment = left
+    ws[f'A{hint_row}'].font = malgun_small_red
+    ws.row_dimensions[hint_row].height = 15
+
+    # ========== 外围粗边框 ==========
+    last_row = hint_row
+    for r in range(1, last_row + 1):
+        for c in range(1, 12):
+            cell = ws.cell(row=r, column=c)
+            left_s = thick_side if c == 1 else thin_side
+            right_s = thick_side if c == 11 else thin_side
+            top_s = thick_side if r == 1 else thin_side
+            bottom_s = thick_side if r == last_row else thin_side
+            cell.border = Border(left=left_s, right=right_s, top=top_s, bottom=bottom_s)
+
+    # 移到第一个位置
+    sheet_names = workbook.sheetnames
+    if '견적서' in sheet_names:
+        idx = sheet_names.index('견적서')
+        workbook.move_sheet('견적서', offset=-idx)
+
+    print(f"   ✅ 报价单(견적서)已生成")
+    return ws.title
+
+
+def split_and_create_quotations(
+        input_file,
+        price_file_path,
+        output_dir=None,
+        image_path=None,
+        image_folder=None,
+        price_mapping_override=None,
+        contact_info=None,
+        matrix_data=None,
+        return_details=False,
+        selected_bom_keys=None,
+        group=None,
+):
+    """
+    主函数：拆分多工作表BOM并生成韩语报价表（所有报价表在同一个Excel文件的不同Sheet中）
+    计价单位从价格表获取
+    同时生成独立的询价表文件，包含所有未匹配价格的产品（不去重）
+    """
+    if output_dir is None:
+        output_dir = os.path.join(os.path.dirname(input_file), 'quotation_output')
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 预扫描图片并准备临时目录
+    code_to_images = {}
+    image_cache = {}
+    image_temp_dir = None
+    # 先尝试从日志加载匹配结果
+    log_search_dirs = [output_dir, os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")]
+    latest_log = find_latest_image_log(log_search_dirs)
+    if latest_log:
+        log_mapping = load_image_mapping_from_log(latest_log)
+        if log_mapping:
+            code_to_images.update(log_mapping)
+            print(f"已从日志加载图片匹配: {latest_log}")
+
+    if image_folder and os.path.exists(image_folder):
+        print(f"图片文件夹: {image_folder}")
+        scanned = scan_images(image_folder)
+        # 用扫描结果补全日志中缺失的编码
+        for code, paths in scanned.items():
+            if code not in code_to_images:
+                code_to_images[code] = paths
+        if code_to_images:
+            image_temp_dir = os.path.join(output_dir, f"temp_images_{uuid.uuid4().hex}")
+            os.makedirs(image_temp_dir, exist_ok=True)
+    elif image_folder:
+        print(f"⚠️ 图片文件夹不存在: {image_folder}")
+        image_folder = None
+
+    print(f"\n{'=' * 80}")
+    print(f"开始处理文件: {input_file}")
+    print(f"价格文件: {price_file_path}")
+    print(f"输出目录: {output_dir}")
+    print(f"{'=' * 80}\n")
+
+    # 加载价格映射
+    if price_mapping_override is not None:
+        price_mapping = price_mapping_override
+    else:
+        price_mapping = load_price_mapping(price_file_path)
+    selected_key_set = normalize_selected_bom_keys(selected_bom_keys)
+
+    column_mapping = {
+        '编码': '编码', 'Part No.': '编码',
+        '名称': '名称', 'Part Name': '名称',
+        '规格': '规格', 'Spec': '规格',
+        '材质': '材质', 'Material': '材质',
+        '数量': '数量', 'Qty.': '数量',
+        '备注': '备注', 'Remark': '备注',
+        '单重': '单重', '(Kg)': '单重'
+    }
+
+    skip_keywords = [
+        'BOM表-', '导轨切法', '架台角度', '布板方式', '架台类型', '是否内缩',
+        '切法辅助', '导轨压块配套方案', '导轨定长方案', '中压块类型',
+        '中侧压块配套方案', '导轨总长', '东西板间距', '板规', '阵列',
+        '是否东西可调', '导轨伸出面板长度', '跨距', '基础类型',
+        '备注：', '基数：', '单基总重', '多基总重'
+    ]
+
+    print(f"正在读取文件: {input_file}")
+    xls = excel_file_compat(input_file)
+
+    master_wb = Workbook()
+    default_sheet = master_wb.active
+    master_wb.remove(default_sheet)
+
+    all_quotation_results = []
+    all_unmatched_products = []  # 收集所有未匹配的产品（不去重）
+    inquiry_file = None
+
+    print(f"\n发现 {len(xls.sheet_names)} 个工作表: {xls.sheet_names}")
+    print("=" * 80)
+    bom_sheet_names = quick_scan_bom_sheets(xls, ['对照表', '物料总表', '定价表', '套件明细', 'Sheet'], selected_key_set)
+    for sheet_name in bom_sheet_names:
+        df = xls.parse(sheet_name=sheet_name, header=None)
+        total_rows = len(df)
+
+        if df.empty or total_rows < 5:
+            print(f"\n⏭️  跳过空表: {sheet_name}")
+            continue
+
+        print(f"\n📋 处理工作表: {sheet_name}")
+        print("-" * 80)
+        print(f"   工作表形状: {df.shape}")
+
+        bom_starts = discover_sheet_bom_starts(df, total_rows, sheet_name=sheet_name)
+        selected_bom_starts = [
+            bom_info for bom_info in bom_starts
+            if not selected_key_set or bom_info.get('key') in selected_key_set
+        ]
+
+        matrix_arrays = (matrix_data or {}).get('arrays') or []
+        matrix_array_rows = (matrix_data or {}).get('array_rows')
+        matrix_array_cols = (matrix_data or {}).get('array_cols')
+
+        if matrix_arrays:
+            valid_array_dims = {(a.get('rows'), a.get('cols')) for a in matrix_arrays
+                               if a.get('rows') and a.get('cols')}
+            matched = []
+            for bom_info in selected_bom_starts:
+                bom_array_str = str((bom_info.get('config') or {}).get('array', ''))
+                bom_r, bom_c = parse_array_to_rows_cols(bom_array_str)
+                if (bom_r, bom_c) in valid_array_dims:
+                    matched.append(bom_info)
+                else:
+                    dim_list = ', '.join(f"{r}×{c}" for r, c in sorted(valid_array_dims))
+                    print(f"   ⏭️  跳过阵列不匹配的BOM: {bom_info.get('variant_name', '')} "
+                          f"(阵列 {bom_array_str} ≠ 阵列表 [{dim_list}])")
+            skipped_count = len(selected_bom_starts) - len(matched)
+            selected_bom_starts = matched
+            if skipped_count:
+                dim_list = ', '.join(f"{r}×{c}" for r, c in sorted(valid_array_dims))
+                print(f"   按阵列表多阵列([{dim_list}])过滤，跳过 {skipped_count} 个不匹配的BOM")
+        elif matrix_array_rows is not None and matrix_array_cols is not None:
+            matched = []
+            for bom_info in selected_bom_starts:
+                bom_array_str = str((bom_info.get('config') or {}).get('array', ''))
+                bom_r, bom_c = parse_array_to_rows_cols(bom_array_str)
+                if bom_r == matrix_array_rows and bom_c == matrix_array_cols:
+                    matched.append(bom_info)
+                else:
+                    print(f"   ⏭️  跳过阵列不匹配的BOM: {bom_info.get('variant_name', '')} "
+                          f"(阵列 {bom_array_str} ≠ 阵列表 {matrix_array_rows}x{matrix_array_cols})")
+            skipped_count = len(selected_bom_starts) - len(matched)
+            selected_bom_starts = matched
+            if skipped_count:
+                print(f"   按阵列表({matrix_array_rows}x{matrix_array_cols})过滤，跳过 {skipped_count} 个不匹配的BOM")
+
+        print(f"   发现 {len(bom_starts)} 个BOM表，选中 {len(selected_bom_starts)} 个")
+
+        selected_index = 0
+        # 处理每个选中的 BOM
+        for original_index, bom_info in enumerate(bom_starts, 1):
+            if selected_key_set and bom_info.get('key') not in selected_key_set:
+                continue
+            if bom_info not in selected_bom_starts:
+                continue
+
+            selected_index += 1
+            print(f"\n   处理第 {selected_index}/{len(selected_bom_starts)} 个BOM表...")
+
+            bom_df = extract_bom_dataframe(
+                df, bom_info, original_index, bom_starts, total_rows,
+                column_mapping, skip_keywords
+            )
+
+            if bom_df is not None and not bom_df.empty:
+                sheet_prefix = f"{sheet_name}_{bom_info['variant_name']}"
+
+                try:
+                    result = create_quotation_from_dataframe(
+                        bom_df,
+                        master_wb,
+                        sheet_prefix,
+                        price_mapping,
+                        image_path,
+                        image_folder,
+                        code_to_images,
+                        image_temp_dir,
+                        image_cache,
+                        all_unmatched_products,
+                        contact_info,
+                        config=bom_info['config'],
+                        matrix_data=matrix_data,
+                        group=group,
+                    )
+                    result['config'] = bom_info['config']
+                    result['set_count'] = (matrix_data or {}).get('set_count') or 1
+                    all_quotation_results.append(result)
+                    print(f"   ✅ 报价表生成成功: {result['sheet_name']} "
+                          f"(匹配{result['matched_count']}项, 未匹配{result['unmatched_count']}项, "
+                          f"米计价{result['meter_unit_count']}项, 个/套计价{result['piece_unit_count']}项, "
+                          f"图片{result['image_found_count']}/{result['image_found_count'] + result['image_not_found_count']})")
+                except Exception as e:
+                    print(f"   ❌ 报价表生成失败: {e}")
+            else:
+                print(f"   ❌ BOM数据提取失败")
+
+    # 保存报价汇总文件
+    if all_quotation_results:
+        if matrix_data:
+            try:
+                create_summary_quotation_sheet(
+                    master_wb, all_quotation_results,
+                    matrix_data=matrix_data,
+                    image_path=image_path,
+                    contact_info=contact_info,
+                )
+            except Exception as e:
+                print(f"   ❌ 报价单(견적서)生成失败: {e}")
+
+        input_basename = os.path.splitext(os.path.basename(input_file))[0]
+        output_file = os.path.join(output_dir, f"{input_basename}_报价汇总.xlsx")
+
+        master_wb.save(output_file)
+
+        print("\n" + "=" * 80)
+        print(f"✅ 处理完成！共生成 {len(all_quotation_results)} 个报价表")
+        print(f"📁 报价汇总文件: {output_file}")
+
+        # 如果有未匹配的产品，生成独立的询价表文件（不去重）
+        if all_unmatched_products:
+            print(f"\n📋 发现 {len(all_unmatched_products)} 个未匹配价格的产品条目...")
+
+            # 统计未匹配的产品（不去重，显示所有条目）
+            print(f"   📊 未匹配产品明细（前20条）:")
+            for i, p in enumerate(all_unmatched_products[:20], 1):
+                print(f"      {i}. 编码:{p['code']} | 名称:{p['name']} | 数量:{p['quantity']}")
+            if len(all_unmatched_products) > 20:
+                print(f"      ... 还有 {len(all_unmatched_products) - 20} 条")
+
+            # 保存为独立的询价表文件（不去重）
+            inquiry_file = save_inquiry_sheet_to_file(
+                all_unmatched_products,  # 直接传入，不去重
+                output_dir,
+                input_file,
+                inquiry_requester=(contact_info or {}).get('inquiry_requester', ''),
+            )
+
+            if inquiry_file:
+                print(f"📋 询价表已单独保存: {inquiry_file}")
+
+        print("\n📊 生成工作表汇总:")
+        print("-" * 80)
+
+        total_products = 0
+        total_weight = 0
+        total_price = 0
+        total_matched = 0
+        total_unmatched = 0
+        total_meter_unit = 0
+        total_piece_unit = 0
+        total_length_fail = 0
+        total_images_found = 0
+        total_images_not_found = 0
+
+        for i, item in enumerate(all_quotation_results, 1):
+            print(f"  {i:2d}. {item['sheet_name']}")
+            print(
+                f"      物料项数: {item['valid_products']} 项 | 总重量: {item['total_weight']:.2f} KG | 总价: {item['total_price']:.2f} USD")
+            print(f"      价格匹配: 成功 {item['matched_count']} 项, 失败 {item['unmatched_count']} 项")
+            print(f"      计价单位: 米计价 {item['meter_unit_count']} 项, 个/套计价 {item['piece_unit_count']} 项")
+            print(f"      图片匹配: 成功 {item['image_found_count']} 张, 未找到 {item['image_not_found_count']} 张")
+            if item.get('length_extract_fail_count', 0) > 0:
+                print(f"      长度提取失败: {item['length_extract_fail_count']} 项 (已按个计价)")
+            total_products += item['valid_products']
+            total_weight += item['total_weight']
+            total_price += item['total_price']
+            total_matched += item['matched_count']
+            total_unmatched += item['unmatched_count']
+            total_meter_unit += item['meter_unit_count']
+            total_piece_unit += item['piece_unit_count']
+            total_length_fail += item.get('length_extract_fail_count', 0)
+            total_images_found += item['image_found_count']
+            total_images_not_found += item['image_not_found_count']
+
+        print("\n📊 总体统计:")
+        print(f"  总工作表数: {len(all_quotation_results)}")
+        print(f"  总物料项数: {total_products}")
+        print(f"  总重量: {total_weight:.2f} KG")
+        print(f"  总金额: {total_price:.2f} USD")
+        print(f"  价格匹配: 成功 {total_matched} 项, 失败 {total_unmatched} 项")
+        print(f"  计价单位: 米计价 {total_meter_unit} 项, 个/套计价 {total_piece_unit} 项")
+        print(f"  图片匹配: 成功 {total_images_found} 张, 未找到 {total_images_not_found} 张")
+        if total_length_fail > 0:
+            print(f"  长度提取失败: {total_length_fail} 项 (已按个计价)")
+
+        print("\n" + "=" * 80)
+        print("✅ 所有报价表生成完成！")
+
+        # 打印询价表统计
+        if all_unmatched_products:
+            print(f"\n📋 询价表统计:")
+            print(f"  未匹配产品总数: {len(all_unmatched_products)} 条")
+            # 按编码统计重复情况
+            from collections import Counter
+            code_counts = Counter([p['code'] for p in all_unmatched_products if p['code']])
+            duplicate_codes = {code: count for code, count in code_counts.items() if count > 1}
+            if duplicate_codes:
+                print(f"  重复出现的编码: {len(duplicate_codes)} 个")
+                for code, count in list(duplicate_codes.items())[:10]:
+                    print(f"      {code}: 出现 {count} 次")
+
+        # 清理临时图片目录
+        if image_temp_dir and os.path.exists(image_temp_dir):
+            try:
+                shutil.rmtree(image_temp_dir)
+            except:
+                pass
+
+        if return_details:
+            return {
+                'output_file': output_file,
+                'inquiry_file': inquiry_file,
+                'unmatched_count': len(all_unmatched_products)
+            }
+        return output_file
+    else:
+        print("\n❌ 没有生成任何报价表")
+        if image_temp_dir and os.path.exists(image_temp_dir):
+            try:
+                shutil.rmtree(image_temp_dir)
+            except:
+                pass
+        return None
+
+
+def analyze_unmatched_codes(input_file, price_file_path, price_mapping_override=None):
+    """
+    Use the same BOM parsing logic as quotation generation to find unmatched codes.
+    Returns: dict with unmatched_codes, total_products, matched_count, unmatched_count.
+    """
+    if price_mapping_override is not None:
+        price_mapping = price_mapping_override
+    else:
+        price_mapping = load_price_mapping(price_file_path)
+
+    column_mapping = {
+        '编码': '编码', 'Part No.': '编码',
+        '名称': '名称', 'Part Name': '名称',
+        '规格': '规格', 'Spec': '规格',
+        '材质': '材质', 'Material': '材质',
+        '数量': '数量', 'Qty.': '数量',
+        '备注': '备注', 'Remark': '备注',
+        '单重': '单重', '(Kg)': '单重'
+    }
+
+    skip_keywords = [
+        'BOM表', '导轨切法', '柜台角度', '布局方式', '柜台类型', '是否内缩',
+        '切法辅助', '导轨压块配套方案', '导轨定长方案', '中压块类型',
+        '中侧压块配套方案', '导轨总长', '东西板间距', '板规', '阵列',
+        '是否东西可调', '导轨伸出面板长度', '跨距', '基础类型',
+        '备注：', '基数：', '单基总重', '多基总重'
+    ]
+
+    xls = excel_file_compat(input_file)
+    unmatched_codes = []
+    total_products = 0
+    matched_count = 0
+    unmatched_items_count = 0
+
+    bom_sheet_names = quick_scan_bom_sheets(xls, ['配套', '配置', '价格表', '物料总表'])
+
+    for sheet_name in bom_sheet_names:
+        df = xls.parse(sheet_name=sheet_name, header=None)
+        total_rows = len(df)
+        if df.empty or total_rows < 5:
+            continue
+
+        bom_starts = []
+        for idx, row in df.iterrows():
+            row_str = ' '.join([str(x) if pd.notna(x) else '' for x in row])
+            if "BOM表" in row_str:
+                config = extract_config_info(df, idx, total_rows)
+                bom_starts.append({
+                    'row': idx,
+                    'config': config,
+                    'variant_name': f"{config.get('array', '未知')}_{config.get('variant', '标准')}"
+                })
+
+        for i, bom_info in enumerate(bom_starts, 1):
+            bom_df = extract_bom_dataframe(
+                df, bom_info, i, bom_starts, total_rows,
+                column_mapping, skip_keywords
+            )
+            if bom_df is None or bom_df.empty:
+                continue
+
+            products, _, _ = read_bom_from_dataframe(bom_df)
+            for product in products:
+                product_code = str(product.get('code', '')).strip()
+                if not product_code:
+                    continue
+                total_products += 1
+                if product_code in price_mapping:
+                    matched_count += 1
+                else:
+                    unmatched_items_count += 1
+                    unmatched_codes.append(product_code)
+
+    unique_unmatched = []
+    seen = set()
+    for code in unmatched_codes:
+        if code not in seen:
+            unique_unmatched.append(code)
+            seen.add(code)
+
+    return {
+        'unmatched_codes': unique_unmatched,
+        'unmatched_code_count': len(unique_unmatched),
+        'unmatched_items_count': unmatched_items_count,
+        'total_products': total_products,
+        'matched_count': matched_count,
+        'unmatched_count': len(unique_unmatched)
+    }
+
