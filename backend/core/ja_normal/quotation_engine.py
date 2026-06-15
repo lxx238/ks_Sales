@@ -263,11 +263,12 @@ def create_normal_summary_sheet(workbook, detail_results, matrix_data=None,
     ws[f'A{r_sub}'] = '架台総金額(USD)'
     ws[f'A{r_sub}'].font = SM_FONT
     ws[f'A{r_sub}'].alignment = right_a
-    ws.merge_cells(f'A{r_sub}:H{r_sub}')
-    ws[f'K{r_sub}'] = f'=SUM(J{data_row_start}:J{data_end})'
-    ws[f'K{r_sub}'].font = SM_FONT
-    ws[f'K{r_sub}'].alignment = center
-    ws[f'K{r_sub}'].number_format = NUM_FMT
+    ws.merge_cells(f'A{r_sub}:I{r_sub}')
+    ws.merge_cells(f'J{r_sub}:K{r_sub}')
+    ws[f'J{r_sub}'] = f'=SUM(J{data_row_start}:J{data_end})'
+    ws[f'J{r_sub}'].font = SM_FONT
+    ws[f'J{r_sub}'].alignment = center
+    ws[f'J{r_sub}'].number_format = NUM_FMT
     for c in range(1, 12):
         ws.cell(row=r_sub, column=c).fill = BLUE_FILL
 
@@ -344,8 +345,9 @@ def create_normal_summary_sheet(workbook, detail_results, matrix_data=None,
     ws[f'A{r_1}'] = '①架台＋杭本体　総金額(USD)'
     ws[f'A{r_1}'].font = SM_FONT
     ws[f'A{r_1}'].alignment = right_a
-    ws.merge_cells(f'A{r_1}:H{r_1}')
-    ws[f'J{r_1}'] = f'=K{r_sub}+K{r_pile}'
+    ws.merge_cells(f'A{r_1}:I{r_1}')
+    ws.merge_cells(f'J{r_1}:K{r_1}')
+    ws[f'J{r_1}'] = f'=J{r_sub}+K{r_pile}'
     ws[f'J{r_1}'].font = SM_FONT
     ws[f'J{r_1}'].alignment = center
     ws[f'J{r_1}'].number_format = '#,##0.00'
@@ -355,7 +357,8 @@ def create_normal_summary_sheet(workbook, detail_results, matrix_data=None,
     ws[f'A{r_kw}'] = '発電量(KW)'
     ws[f'A{r_kw}'].font = SM_FONT
     ws[f'A{r_kw}'].alignment = right_a
-    ws.merge_cells(f'A{r_kw}:H{r_kw}')
+    ws.merge_cells(f'A{r_kw}:I{r_kw}')
+    ws.merge_cells(f'J{r_kw}:K{r_kw}')
     ws[f'J{r_kw}'] = f'=SUM(G{data_row_start}:G{data_end})'
     ws[f'J{r_kw}'].font = SM_FONT
     ws[f'J{r_kw}'].alignment = center
@@ -366,7 +369,8 @@ def create_normal_summary_sheet(workbook, detail_results, matrix_data=None,
     ws[f'A{r_wp}'] = 'ワットあたりの価格'
     ws[f'A{r_wp}'].font = SM_FONT
     ws[f'A{r_wp}'].alignment = right_a
-    ws.merge_cells(f'A{r_wp}:H{r_wp}')
+    ws.merge_cells(f'A{r_wp}:I{r_wp}')
+    ws.merge_cells(f'J{r_wp}:K{r_wp}')
     ws[f'J{r_wp}'] = f'=J{r_1}/J{r_kw}/1000'
     ws[f'J{r_wp}'].font = SM_FONT
     ws[f'J{r_wp}'].alignment = center

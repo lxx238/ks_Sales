@@ -1273,6 +1273,7 @@ def batch_update_data_from_excel(file_storage, actor_role, actor_user=''):
             return {'success': False, 'message': 'Excel 中没有可更新的数据列'}, 400
 
         updated_count = 0
+        inserted_count = 0
         skipped_count = 0
         missing_codes = []
 
@@ -1296,9 +1297,15 @@ def batch_update_data_from_excel(file_storage, actor_role, actor_user=''):
                 (code,)
             )
             if cursor.fetchone()[0] == 0:
-                if len(missing_codes) < 50:
-                    missing_codes.append(code)
-                skipped_count += 1
+                insert_cols = [DB_CODE_COLUMN] + list(updates.keys())
+                insert_vals = [code] + list(updates.values())
+                col_names = ', '.join([f'"{col}"' for col in insert_cols])
+                placeholders = ', '.join(['?'] * len(insert_cols))
+                cursor.execute(
+                    f'INSERT INTO {DB_TABLE_NAME} ({col_names}) VALUES ({placeholders})',
+                    insert_vals,
+                )
+                inserted_count += 1
                 continue
 
             set_clause = ', '.join([f'"{col}" = ?' for col in updates.keys()])
@@ -1311,8 +1318,10 @@ def batch_update_data_from_excel(file_storage, actor_role, actor_user=''):
         conn.close()
 
         msg = f'批量更新完成，共更新 {updated_count} 条记录'
+        if inserted_count:
+            msg += f'，新增 {inserted_count} 条'
         if skipped_count:
-            msg += f'，跳过 {skipped_count} 条（数据库中无对应编码）'
+            msg += f'，跳过 {skipped_count} 条'
         if new_columns:
             msg += f'，新增 {len(new_columns)} 列：{", ".join(new_columns)}'
 
@@ -1320,6 +1329,7 @@ def batch_update_data_from_excel(file_storage, actor_role, actor_user=''):
             'success': True,
             'message': msg,
             'updated_count': updated_count,
+            'inserted_count': inserted_count,
             'skipped_count': skipped_count,
             'missing_codes_sample': missing_codes[:20],
             'updated_columns': list(valid_cols.values()),

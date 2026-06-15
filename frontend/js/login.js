@@ -20,6 +20,7 @@ function getPermissionPage(permissions) {
         'database': 'database',
         'records': 'records',
         'questions': 'questions',
+        'logistics': 'logistics',
     };
     if (Array.isArray(permissions) && permissions.length > 0) {
         for (const perm of permissions) {

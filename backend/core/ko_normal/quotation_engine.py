@@ -2106,6 +2106,25 @@ def create_summary_quotation_sheet(workbook, all_quotation_results, matrix_data=
     total_output_kw = Decimal('0')
     total_weight_all = Decimal('0')
 
+    _arrays_for_sort = matrix_data.get('arrays') or []
+    if _arrays_for_sort:
+        _arr_pos = {}
+        for _ai, _ae in enumerate(_arrays_for_sort):
+            _k = (_ae.get('rows'), _ae.get('cols'), _ae.get('table_qty', 1), _ae.get('missing_per_table', 0) or 0)
+            if _k not in _arr_pos:
+                _arr_pos[_k] = _ai
+        def _sort_by_array(item):
+            _idx, _d = item
+            _explicit = _d.get('_matrix_idx')
+            if _explicit is not None:
+                return (_explicit, _d.get('accumulated_sub_idx', 0), _idx)
+            _ma = _d.get('matched_array') or _d.get('matrix_data') or {}
+            _k = (_ma.get('rows'), _ma.get('cols'), _ma.get('table_qty', 1) or 1, _ma.get('missing_per_table', 0) or 0)
+            return (_arr_pos.get(_k, len(_arrays_for_sort)), 0, _idx)
+        _indexed = list(enumerate(all_quotation_results))
+        _indexed.sort(key=_sort_by_array)
+        all_quotation_results[:] = [_r for _, _r in _indexed]
+
     _summary_rows = []
     _seen_acc_groups = set()
     for qr in all_quotation_results:
@@ -2145,7 +2164,9 @@ def create_summary_quotation_sheet(workbook, all_quotation_results, matrix_data=
             except (ArithmeticError, ValueError):
                 pass
 
-            ws.cell(row=row_num, column=1, value=f'{i + 1}#').alignment = center
+            _m_idx = qr.get('_matrix_idx')
+            _no_label = f"({_m_idx + 1})" if _m_idx is not None else f'{i + 1}'
+            ws.cell(row=row_num, column=1, value=_no_label).alignment = center
             ws.cell(row=row_num, column=2, value=row_array_rows or '')
             ws.cell(row=row_num, column=3, value=row_array_cols or '')
             ws.cell(row=row_num, column=4, value=row_set_count)
@@ -2199,7 +2220,9 @@ def create_summary_quotation_sheet(workbook, all_quotation_results, matrix_data=
             total_weight_all += _group_total_weight
             total_output_kw += _group_output_kw
 
-            ws.cell(row=row_num, column=1, value=f'{i + 1}#').alignment = center
+            _m_idx_first = items[0].get('_matrix_idx')
+            _no_label = f"({_m_idx_first + 1})" if _m_idx_first is not None else f'{i + 1}'
+            ws.cell(row=row_num, column=1, value=_no_label).alignment = center
             ws.cell(row=row_num, column=2, value=_group_rows)
             ws.cell(row=row_num, column=3, value=_group_cols)
             ws.cell(row=row_num, column=4, value=_group_total_qty)
@@ -2939,6 +2962,8 @@ def split_and_create_quotations(
                                 sheet_prefix = base_prefix
                         else:
                             sheet_prefix = base_prefix
+                        if matched_idx is not None:
+                            sheet_prefix = f"({matched_idx + 1}){sheet_prefix}"
 
                     effective_matrix_data = build_bom_matrix_data(
                         matrix_data, matched_array, bom_config=bom_info.get('config'),
@@ -2975,6 +3000,8 @@ def split_and_create_quotations(
                     result['matched_array'] = matched_array
                     result['matrix_data'] = effective_matrix_data
                     result['set_count'] = effective_matrix_data.get('set_count') or 1
+                    if matched_idx is not None:
+                        result['_matrix_idx'] = matched_idx
                     bom_cfg = bom_info.get('config') or {}
                     result['matched_info'] = {
                         'bom_key': bom_info.get('key', ''),
@@ -3017,91 +3044,83 @@ def split_and_create_quotations(
             m_idx = acc['matrix_idx']
             matrix_entry = acc['matrix_entry']
             accumulated_base = acc['accumulated_base']
+            merged_products = acc.get('merged_products', [])
+            selected_boms = acc.get('selected_boms', [])
 
             used_matrix_array_indices.add(m_idx)
 
             ma_rows = matrix_entry.get('rows', '')
             ma_cols = matrix_entry.get('cols', '')
             ma_qty = matrix_entry.get('table_qty', 1)
+            _accum_group_id = f"{ma_rows}×{ma_cols}_{ma_qty}"
 
-            _acc_group_results = []
-            for _bom_order, _pb in enumerate(acc['selected_boms'], 1):
-                _pb_products = _pb.get('products') or []
-                _pb_config = _pb.get('config') or {}
-                _pb_base = _pb.get('base_count', 0) or 1
-                _pb_rows = _pb.get('rows')
-                _pb_cols = _pb.get('cols')
+            sheet_prefix = f"{ma_rows}×{ma_cols}_{ma_qty}"
+            sheet_prefix = f"({m_idx + 1}){sheet_prefix}"
 
-                _bom_prefix = f"{ma_rows}×{ma_cols}_{_pb_base}_bom{_bom_order}"
+            _pb_config = (selected_boms[0].get('config') if selected_boms else None) or {}
+            _pb_array_info = f"{ma_rows}×{ma_cols}" if ma_rows and ma_cols else ''
 
-                _bom_entry = dict(matrix_entry)
-                _bom_entry['table_qty'] = _pb_base
+            _pb_effective_md = build_bom_matrix_data(
+                matrix_data, matrix_entry, bom_config=_pb_config,
+            )
 
-                _pb_effective_md = build_bom_matrix_data(
-                    matrix_data, _bom_entry, bom_config=_pb_config,
+            try:
+                _pb_result = create_quotation_from_dataframe(
+                    None, master_wb, sheet_prefix, price_mapping,
+                    image_path=image_path,
+                    image_folder=image_folder,
+                    code_to_images=code_to_images,
+                    image_temp_dir=image_temp_dir,
+                    image_cache=image_cache,
+                    unmatched_products_list=all_unmatched_products,
+                    contact_info=contact_info,
+                    config=_pb_config,
+                    matrix_data=_pb_effective_md,
+                    group=group,
+                    exclude_options=exclude_options,
+                    sale_type=sale_type,
+                    ko_discount_rate=ko_discount_rate,
+                    ko_steel_discount_rate=ko_steel_discount_rate,
+                    ko_purchased_discount_rate=ko_purchased_discount_rate,
+                    coating_thickness=coating_thickness,
+                    delete_options=delete_options,
+                    always_exclude_extra_items=always_exclude_extra_items,
+                    ko_exclude_options=ko_exclude_options,
+                    pre_parsed_products=(merged_products, _pb_array_info, _pb_config.get('cross_span', '')),
+                    ko_discount_in_detail=ko_discount_in_detail,
                 )
+                _pb_result['config'] = _pb_config
+                _pb_result['matched_array'] = matrix_entry
+                _pb_result['matrix_data'] = _pb_effective_md
+                _pb_result['set_count'] = ma_qty
+                _pb_result['_matrix_idx'] = m_idx
+                _pb_result['_acc_group_id'] = _accum_group_id
+                _pb_result['accumulated_sub_idx'] = 0
+                _pb_result['_acc_group_total_qty'] = ma_qty
+                _pb_result['matched_info'] = {
+                    'bom_key': '',
+                    'bom_variant': f"acc_merged_{len(selected_boms)}boms",
+                    'bom_array': f"{ma_rows}×{ma_cols}",
+                    'bom_missing': _pb_config.get('missing_boards', 0) or 0,
+                    'bom_base_count': ma_qty,
+                    'matched_array_no': '',
+                }
+                all_quotation_results.append(_pb_result)
 
-                _pb_array_info = f"{_pb_rows}×{_pb_cols}" if _pb_rows and _pb_cols else ''
+                _pb_pile = _pb_result.get('pile_products', [])
+                if _pb_pile:
+                    for pp in _pb_pile:
+                        scaled = dict(pp)
+                        scaled['quantity'] = float(pp.get('quantity', 0))
+                        pile_products_all.append(scaled)
 
-                try:
-                    _pb_result = create_quotation_from_dataframe(
-                        None, master_wb, _bom_prefix, price_mapping,
-                        image_path=image_path,
-                        image_folder=image_folder,
-                        code_to_images=code_to_images,
-                        image_temp_dir=image_temp_dir,
-                        image_cache=image_cache,
-                        unmatched_products_list=all_unmatched_products,
-                        contact_info=contact_info,
-                        config=_pb_config,
-                        matrix_data=_pb_effective_md,
-                        group=group,
-                        exclude_options=exclude_options,
-                        sale_type=sale_type,
-                        ko_discount_rate=ko_discount_rate,
-                        ko_steel_discount_rate=ko_steel_discount_rate,
-                        ko_purchased_discount_rate=ko_purchased_discount_rate,
-                        coating_thickness=coating_thickness,
-                        delete_options=delete_options,
-                        always_exclude_extra_items=always_exclude_extra_items,
-                        ko_exclude_options=ko_exclude_options,
-                        pre_parsed_products=(_pb_products, _pb_array_info, _pb_config.get('cross_span', '')),
-                        ko_discount_in_detail=ko_discount_in_detail,
-                    )
-                    _pb_result['config'] = _pb_config
-                    _pb_result['matched_array'] = matrix_entry
-                    _pb_result['matrix_data'] = _pb_effective_md
-                    _pb_result['set_count'] = _pb_base
-                    _pb_result['_acc_group_id'] = m_idx
-                    _pb_result['_acc_group_total_qty'] = ma_qty
-                    _pb_result['matched_info'] = {
-                        'bom_key': '',
-                        'bom_variant': f"acc_bom{_bom_order}/{len(acc['selected_boms'])}",
-                        'bom_array': f"{ma_rows}×{ma_cols}",
-                        'bom_missing': _pb_config.get('missing_boards', 0) or 0,
-                        'bom_base_count': _pb_base,
-                        'matched_array_no': '',
-                    }
-                    all_quotation_results.append(_pb_result)
-                    _acc_group_results.append(_pb_result)
-
-                    _pb_pile = _pb_result.get('pile_products', [])
-                    if _pb_pile:
-                        for pp in _pb_pile:
-                            scaled = dict(pp)
-                            scaled['quantity'] = float(pp.get('quantity', 0))
-                            pile_products_all.append(scaled)
-
-                    print(f"   ✅ 报价表生成成功(累加明细{_bom_order}/{len(acc['selected_boms'])}): {_pb_result['sheet_name']} "
-                          f"(匹配{_pb_result['matched_count']}项, 未匹配{_pb_result['unmatched_count']}项)")
-                except Exception as e:
-                    import traceback
-                    print(f"   ❌ 累加报价表生成失败(bom{_bom_order}): {e}")
-                    traceback.print_exc()
-
-            if _acc_group_results:
-                print(f"   ✅ 累加匹配完成: {ma_rows}×{ma_cols}_{ma_qty} → {len(_acc_group_results)}个明细sheet "
-                      f"(合并{len(acc['selected_boms'])}个BOM)")
+                print(f"   ✅ 报价表生成成功(累加合并): {_pb_result['sheet_name']} "
+                      f"(合并{len(selected_boms)}个BOM, base={ma_qty}, "
+                      f"匹配{_pb_result['matched_count']}项)")
+            except Exception as e:
+                import traceback
+                print(f"   ❌ 累加报价表生成失败: {e}")
+                traceback.print_exc()
 
     # ========== 信息表累加匹配 (多个小信息表 → 一个大BOM) ==========
     if pending_boms and has_explicit_matrix_arrays and matrix_array_entries:
@@ -3135,6 +3154,8 @@ def split_and_create_quotations(
             ma_rows = first_entry.get('rows', '')
             ma_cols = first_entry.get('cols', '')
             sheet_prefix = f"{ma_rows}×{ma_cols}_{bom_base}"
+            if m_indices:
+                sheet_prefix = f"({m_indices[0] + 1}){sheet_prefix}"
 
             _acc_entry = dict(first_entry)
             _acc_entry['table_qty'] = bom_base
@@ -3172,6 +3193,7 @@ def split_and_create_quotations(
                 result['matched_array'] = first_entry
                 result['matrix_data'] = effective_matrix_data
                 result['set_count'] = bom_base
+                result['_matrix_idx'] = m_indices[0] if m_indices else None
                 result['matched_info'] = {
                     'bom_key': '',
                     'bom_variant': f"info_accumulated_{len(m_indices)}entries",
@@ -3238,6 +3260,7 @@ def split_and_create_quotations(
             bom_base = matched_pb.get('base_count', 0) or 0
 
             sheet_prefix = f"{info_rows}×{info_cols}_{info_qty}"
+            sheet_prefix = f"({m_idx + 1}){sheet_prefix}"
             same_dim_entries = [
                 e for e in matrix_array_entries
                 if e.get('rows') == info_rows and e.get('cols') == info_cols
@@ -3284,6 +3307,7 @@ def split_and_create_quotations(
                 result['matched_array'] = info_entry
                 result['matrix_data'] = effective_matrix_data
                 result['set_count'] = effective_matrix_data.get('set_count') or 1
+                result['_matrix_idx'] = m_idx
                 result['matched_info'] = {
                     'bom_key': '',
                     'bom_variant': 'indirect',

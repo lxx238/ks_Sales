@@ -489,6 +489,7 @@ def generate_quotation_db_only(data):
             ko_kwargs['en_lang'] = en_lang
             ko_kwargs['discount_method'] = discount_method
             ko_kwargs['payment_term'] = data.get('payment_term', '3070shipment')
+            ko_kwargs['seller_name'] = data.get('seller_name', 'metal')
             ko_kwargs['pre_parsed_products'] = en_products_by_key
             ko_kwargs['pre_parsed_bom_info'] = en_bom_info_by_key
             ko_kwargs['pre_parsed_span_info'] = en_span_info_by_key

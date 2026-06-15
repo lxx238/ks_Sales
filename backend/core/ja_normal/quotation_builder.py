@@ -23,7 +23,7 @@ from backend.core.shared.bom_zip_parser import _build_products_by_key
 from backend.core.shared.product_utils import _split_pile_products
 from backend.core.ja_nv.quotation_engine import create_nv_detail_sheet
 from backend.core.ja_normal.quotation_engine import create_normal_summary_sheet
-from backend.core.shared.sheet_utils import set_page_break_preview
+from backend.core.shared.sheet_utils import reorder_sheets_by_matrix_array, set_page_break_preview
 
 
 def split_and_create_quotations(
@@ -109,21 +109,21 @@ def split_and_create_quotations(
                 if bom_rows == arr.get('rows') and bom_cols == arr.get('cols'):
                     if bom_base_count == (arr.get('table_qty') or 1):
                         used_array_indices.add(i)
-                        return arr
+                        return i, arr
             for i, arr in enumerate(arrays):
                 if i in used_array_indices:
                     continue
                 if bom_rows == arr.get('rows') and bom_cols == arr.get('cols'):
                     used_array_indices.add(i)
-                    return arr
-            return None
+                    return i, arr
+            return None, None
         for i, arr in enumerate(arrays):
             if i in used_array_indices:
                 continue
             if bom_rows == arr.get('rows') and bom_cols == arr.get('cols'):
                 used_array_indices.add(i)
-                return arr
-        return None
+                return i, arr
+        return None, None
 
     all_excluded_products = []
 
@@ -164,7 +164,7 @@ def split_and_create_quotations(
         bom_array_str = config.get('array', '')
         bom_rows, bom_cols = parse_array_to_rows_cols(bom_array_str)
 
-        matched_array = find_matching_array(bom_rows, bom_cols, bom_base_count=config.get('base_count', 0))
+        matched_idx, matched_array = find_matching_array(bom_rows, bom_cols, bom_base_count=config.get('base_count', 0))
         if matched_array is None:
             continue
 
@@ -224,6 +224,7 @@ def split_and_create_quotations(
             detail['config'] = config
             detail['variant_name'] = bom_info.get('variant_name', '')
             detail['bom_key'] = key
+            detail['_matrix_idx'] = matched_idx
             detail['angle'] = config.get('angle', '') or (matrix_data or {}).get('angle', '')
             inv_count = 0
             for ip in (pre_parsed_inverter_products or []):
@@ -315,6 +316,9 @@ def split_and_create_quotations(
                     for c in range(1, 9):
                         ws_first.cell(row=row, column=c).fill = YELLOW_FILL
             first_detail['inv_note'] = f"パワコン取付バー  {sum(int(ip.get('quantity', 0) or 0) for ip in unmatched_inv)}台"
+
+    if all_detail_results and arrays:
+        reorder_sheets_by_matrix_array(master_wb, all_detail_results, arrays, log_prefix='[NORMAL-JA]')
 
     if all_detail_results:
         pile_summary = None

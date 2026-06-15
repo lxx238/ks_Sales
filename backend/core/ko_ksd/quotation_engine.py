@@ -1317,55 +1317,145 @@ def create_ksd_summary_sheet(
     ws.row_dimensions[hdr_row].height = 30
 
     data_row = hdr_row + 1
+
+    _arrays_for_sort = matrix_data.get('arrays') or []
+    if _arrays_for_sort:
+        _arr_pos = {}
+        for _ai, _ae in enumerate(_arrays_for_sort):
+            _k = (_ae.get('rows'), _ae.get('cols'), _ae.get('table_qty', 1), _ae.get('missing_per_table', 0) or 0)
+            if _k not in _arr_pos:
+                _arr_pos[_k] = _ai
+
+        def _sort_by_array(item):
+            _idx, _d = item
+            _explicit = _d.get('_matrix_idx')
+            if _explicit is not None:
+                return (_explicit, _d.get('accumulated_sub_idx', 0), _idx)
+            _ma = _d.get('matched_array') or _d.get('matrix_data') or {}
+            _k = (_ma.get('rows'), _ma.get('cols'), _ma.get('table_qty', 1) or 1, _ma.get('missing_per_table', 0) or 0)
+            return (_arr_pos.get(_k, len(_arrays_for_sort)), 0, _idx)
+
+        _indexed = list(enumerate(all_quotation_results))
+        _indexed.sort(key=_sort_by_array)
+        all_quotation_results[:] = [_r for _, _r in _indexed]
+
+    _accum_seen = set()
+    _visible_row = 0
+
     for i, qr in enumerate(all_quotation_results):
-        r = data_row + i
-        cfg = qr.get('config') or {}
-        md = qr.get('matrix_data') or matrix_data
-        ma = qr.get('matched_array') or {}
-        r_rows = ma.get('rows', md.get('array_rows'))
-        r_cols = ma.get('cols', md.get('array_cols'))
-        r_set = md.get('set_count') or 1
-        try:
-            r_set = int(r_set)
-        except (ValueError, TypeError):
-            pass
-        angle_val = cfg.get('angle', '') or md.get('angle', '')
-        angle_display = normalize_angle(angle_val)
-        r_kw = md.get('output_kw') or 0
-        detail_sheet = qr.get('sheet_name', '')
-        p1_total_table_row = qr.get('part1_total_table_row', 0)
+        _acc_gid = qr.get('accumulated_group_id')
+        if _acc_gid and _acc_gid in _accum_seen:
+            continue
+        if _acc_gid:
+            _accum_seen.add(_acc_gid)
 
-        ws.cell(row=r, column=1, value=i + 1).alignment = center
-        ws.cell(row=r, column=2, value=r_rows or '').alignment = center
-        ws.cell(row=r, column=3, value=r_cols or '').alignment = center
-        ws.cell(row=r, column=4, value=angle_display).alignment = center
-        ws.merge_cells(f'D{r}:E{r}')
-        r_miss = ma.get('missing_per_table', 0) or 0
-        ws.cell(row=r, column=6, value=r_set or '').alignment = center
-        ws.cell(row=r, column=7, value=r_miss or '').alignment = center
-        ws.cell(row=r, column=8, value=r_kw).alignment = center
-        ws.merge_cells(f'H{r}:I{r}')
-        if detail_sheet and p1_total_table_row:
-            ws.cell(row=r, column=10, value=f"='{detail_sheet}'!H{p1_total_table_row}").number_format = ksd_currency_fmt
-        else:
-            ws.cell(row=r, column=10, value=qr.get('part1_price_per_table', 0)).number_format = ksd_currency_fmt
-        ws.cell(row=r, column=10).alignment = center
-        ws.merge_cells(f'J{r}:K{r}')
-        if isinstance(r_set, int) and r_set > 1:
+        r = data_row + _visible_row
+        _visible_row += 1
+
+        if _acc_gid:
+            _group = [d for d in all_quotation_results if d.get('accumulated_group_id') == _acc_gid]
+            _group.sort(key=lambda d: d.get('accumulated_sub_idx', 0))
+            _total_base = sum(d.get('set_count', 1) for d in _group)
+            _first = _group[0]
+            _first_cfg = _first.get('config') or {}
+            _first_md = _first.get('matrix_data') or matrix_data
+            _first_ma = _first.get('matched_array') or {}
+            r_rows = _first_ma.get('rows', _first_md.get('array_rows'))
+            r_cols = _first_ma.get('cols', _first_md.get('array_cols'))
+            angle_val = _first_cfg.get('angle', '') or _first_md.get('angle', '')
+            angle_display = normalize_angle(angle_val)
+            r_kw = sum((d.get('matrix_data') or {}).get('output_kw', 0) or 0 for d in _group)
+
+            _m_idx = _first.get('_matrix_idx')
+            _no_label = f"({_m_idx + 1})" if _m_idx is not None else str(_visible_row)
+
+            ws.cell(row=r, column=1, value=_no_label).alignment = center
+            ws.cell(row=r, column=2, value=r_rows or '').alignment = center
+            ws.cell(row=r, column=3, value=r_cols or '').alignment = center
+            ws.cell(row=r, column=4, value=angle_display).alignment = center
+            ws.merge_cells(f'D{r}:E{r}')
+            r_miss = _first_ma.get('missing_per_table', 0) or 0
+            ws.cell(row=r, column=6, value=_total_base).alignment = center
+            ws.cell(row=r, column=7, value=r_miss if r_miss != 0 else '/').alignment = center
+            ws.cell(row=r, column=8, value=r_kw).alignment = center
+            ws.merge_cells(f'H{r}:I{r}')
+
+            _weighted_parts = []
+            for _gd in _group:
+                _sn = _gd.get('sheet_name', '')
+                _tr = _gd.get('part1_total_table_row', 0)
+                _gd_base = _gd.get('set_count', 1)
+                if _sn and _tr:
+                    _weighted_parts.append(f"'{_sn}'!H{_tr}*{_gd_base}")
+                else:
+                    _weighted_parts.append(str(float(_gd.get('part1_price_per_table', 0)) * _gd_base))
+            if _weighted_parts:
+                ws.cell(row=r, column=10, value=f'=({"+".join(_weighted_parts)})/{_total_base}').number_format = ksd_currency_fmt
+            else:
+                ws.cell(row=r, column=10, value=0).number_format = ksd_currency_fmt
+            ws.cell(row=r, column=10).alignment = center
+            ws.merge_cells(f'J{r}:K{r}')
+
             ws.cell(row=r, column=12, value=f'=J{r}*F{r}').number_format = ksd_currency_fmt
-        else:
-            ws.cell(row=r, column=12, value=f'=J{r}').number_format = ksd_currency_fmt
-        ws.cell(row=r, column=12).alignment = center
-        ws.merge_cells(f'L{r}:M{r}')
-        for ci in range(1, 14):
-            ws.cell(row=r, column=ci).font = normal_font
-            ws.cell(row=r, column=ci).border = thin_border
-        if not qr.get('part1_price_per_table', 0):
-            for ci in range(1, 14):
-                ws.cell(row=r, column=ci).fill = yellow_fill
-        ws.row_dimensions[r].height = 25
+            ws.cell(row=r, column=12).alignment = center
+            ws.merge_cells(f'L{r}:M{r}')
 
-    data_end = data_row + len(all_quotation_results) - 1
+            for ci in range(1, 14):
+                ws.cell(row=r, column=ci).font = normal_font
+                ws.cell(row=r, column=ci).border = thin_border
+            ws.row_dimensions[r].height = 25
+
+        else:
+            cfg = qr.get('config') or {}
+            md = qr.get('matrix_data') or matrix_data
+            ma = qr.get('matched_array') or {}
+            r_rows = ma.get('rows', md.get('array_rows'))
+            r_cols = ma.get('cols', md.get('array_cols'))
+            r_set = md.get('set_count') or 1
+            try:
+                r_set = int(r_set)
+            except (ValueError, TypeError):
+                pass
+            angle_val = cfg.get('angle', '') or md.get('angle', '')
+            angle_display = normalize_angle(angle_val)
+            r_kw = md.get('output_kw') or 0
+            detail_sheet = qr.get('sheet_name', '')
+            p1_total_table_row = qr.get('part1_total_table_row', 0)
+
+            _m_idx = qr.get('_matrix_idx')
+            _no_label = f"({_m_idx + 1})" if _m_idx is not None else str(_visible_row)
+
+            ws.cell(row=r, column=1, value=_no_label).alignment = center
+            ws.cell(row=r, column=2, value=r_rows or '').alignment = center
+            ws.cell(row=r, column=3, value=r_cols or '').alignment = center
+            ws.cell(row=r, column=4, value=angle_display).alignment = center
+            ws.merge_cells(f'D{r}:E{r}')
+            r_miss = ma.get('missing_per_table', 0) or 0
+            ws.cell(row=r, column=6, value=r_set or '').alignment = center
+            ws.cell(row=r, column=7, value=r_miss if r_miss != 0 else '/').alignment = center
+            ws.cell(row=r, column=8, value=r_kw).alignment = center
+            ws.merge_cells(f'H{r}:I{r}')
+            if detail_sheet and p1_total_table_row:
+                ws.cell(row=r, column=10, value=f"='{detail_sheet}'!H{p1_total_table_row}").number_format = ksd_currency_fmt
+            else:
+                ws.cell(row=r, column=10, value=qr.get('part1_price_per_table', 0)).number_format = ksd_currency_fmt
+            ws.cell(row=r, column=10).alignment = center
+            ws.merge_cells(f'J{r}:K{r}')
+            if isinstance(r_set, int) and r_set > 1:
+                ws.cell(row=r, column=12, value=f'=J{r}*F{r}').number_format = ksd_currency_fmt
+            else:
+                ws.cell(row=r, column=12, value=f'=J{r}').number_format = ksd_currency_fmt
+            ws.cell(row=r, column=12).alignment = center
+            ws.merge_cells(f'L{r}:M{r}')
+            for ci in range(1, 14):
+                ws.cell(row=r, column=ci).font = normal_font
+                ws.cell(row=r, column=ci).border = thin_border
+            if not qr.get('part1_price_per_table', 0):
+                for ci in range(1, 14):
+                    ws.cell(row=r, column=ci).fill = yellow_fill
+            ws.row_dimensions[r].height = 25
+
+    data_end = data_row + _visible_row - 1
 
     total_row = data_end + 1
     ws.merge_cells(f'A{total_row}:G{total_row}')

@@ -65,9 +65,23 @@ def build_matrix_array_entries(matrix_data):
     }]
 
 
+def _missing_matches(bom_missing, entry_missing, entry_table_qty):
+    if bom_missing is None:
+        return True
+    entry_missing = entry_missing or 0
+    if bom_missing == entry_missing:
+        return True
+    bom_total = bom_missing * (entry_table_qty or 1)
+    if bom_total == -entry_missing:
+        return True
+    if bom_missing == -entry_missing:
+        return True
+    return False
+
+
 def find_matching_matrix_array(matrix_entries, bom_rows, bom_cols, used_indices=None,
-                               bom_missing=None, bom_base_count=None, strict_only=False,
-                               bom_has_inverter=None):
+                                bom_missing=None, bom_base_count=None, strict_only=False,
+                                bom_has_inverter=None):
     if bom_rows is None or bom_cols is None:
         return None, None
 
@@ -79,7 +93,8 @@ def find_matching_matrix_array(matrix_entries, bom_rows, bom_cols, used_indices=
                 if bom_base_count == (entry.get('table_qty') or 1):
                     if bom_missing is not None:
                         entry_missing = entry.get('missing_per_table', 0) or 0
-                        if entry_missing != bom_missing:
+                        entry_qty = entry.get('table_qty') or 1
+                        if not _missing_matches(bom_missing, entry_missing, entry_qty):
                             continue
                     if bom_has_inverter is not None:
                         if bom_has_inverter != entry.get('has_inverter', False):
@@ -94,7 +109,8 @@ def find_matching_matrix_array(matrix_entries, bom_rows, bom_cols, used_indices=
                 if bom_has_inverter == entry.get('has_inverter', False):
                     if bom_missing is not None:
                         entry_missing = entry.get('missing_per_table', 0) or 0
-                        if entry_missing != bom_missing:
+                        entry_qty = entry.get('table_qty') or 1
+                        if not _missing_matches(bom_missing, entry_missing, entry_qty):
                             continue
                     return idx, entry
 
@@ -106,7 +122,8 @@ def find_matching_matrix_array(matrix_entries, bom_rows, bom_cols, used_indices=
                 if bom_base_count == (entry.get('table_qty') or 1):
                     if bom_missing is not None:
                         entry_missing = entry.get('missing_per_table', 0) or 0
-                        if entry_missing != bom_missing:
+                        entry_qty = entry.get('table_qty') or 1
+                        if not _missing_matches(bom_missing, entry_missing, entry_qty):
                             continue
                     return idx, entry
 
@@ -119,7 +136,8 @@ def find_matching_matrix_array(matrix_entries, bom_rows, bom_cols, used_indices=
         if bom_rows == entry.get('rows') and bom_cols == entry.get('cols'):
             if bom_missing is not None:
                 entry_missing = entry.get('missing_per_table', 0) or 0
-                if entry_missing != bom_missing:
+                entry_qty = entry.get('table_qty') or 1
+                if not _missing_matches(bom_missing, entry_missing, entry_qty):
                     continue
             return idx, entry
 
@@ -166,11 +184,14 @@ def build_bom_matrix_data(matrix_data, matched_array, bom_config=None):
             if not bom_missing_from_config:
                 info_missing = matched_array.get('missing_per_table', 0) or 0
                 bom_missing = info_missing
-            if bom_missing > 0:
-                bom_missing = -bom_missing
+                if bom_missing > 0:
+                    bom_missing = -bom_missing
+            else:
+                if bom_missing > 0:
+                    bom_missing = -(bom_missing * table_qty)
             bom_matrix_data['missing_per_table'] = bom_missing
             if module_wattage is not None:
-                effective_modules = (rows * cols + bom_missing) * table_qty
+                effective_modules = rows * cols * table_qty + bom_missing
                 if effective_modules < 0:
                     effective_modules = 0
                 output_wp = int(round(float(effective_modules) * float(module_wattage)))

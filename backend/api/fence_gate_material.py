@@ -1,6 +1,8 @@
 import base64
 import io
+import os
 import re
+import tempfile
 import zipfile
 from datetime import datetime
 
@@ -452,6 +454,180 @@ def batch_update_route():
         return jsonify({'success': False, 'message': f'批量更新失败: {exc}'}), 500
 
 
+def _import_images_from_excel(file_storage, code_lookup):
+    import xml.etree.ElementTree as ET
+    import openpyxl
+
+    filename = (getattr(file_storage, 'filename', '') or '').lower()
+    if not filename.endswith(('.xlsx', '.xls')):
+        return None
+
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix='.xlsx')
+    try:
+        file_storage.save(tmp_path)
+        os.close(tmp_fd)
+    except Exception:
+        os.close(tmp_fd)
+
+    try:
+        image_map = {}
+        with zipfile.ZipFile(tmp_path, 'r') as zf:
+            rid_to_target = {}
+            try:
+                rels_xml = zf.read('xl/_rels/cellimages.xml.rels').decode('utf-8')
+                for rel in ET.fromstring(rels_xml):
+                    rid = rel.get('Id')
+                    target = rel.get('Target')
+                    if rid and target:
+                        rid_to_target[rid] = target
+            except KeyError:
+                pass
+
+            ci_xml = None
+            try:
+                ci_xml = zf.read('xl/cellimages.xml').decode('utf-8')
+            except KeyError:
+                pass
+
+            if ci_xml:
+                ns = {
+                    'xdr': 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing',
+                    'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+                    'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
+                    'etc': 'http://www.wps.cn/officeDocument/2017/etCustomData',
+                }
+                root = ET.fromstring(ci_xml)
+                for ci in root.findall('.//etc:cellImage', ns):
+                    cnv = ci.find('.//xdr:cNvPr', ns)
+                    if cnv is None:
+                        continue
+                    img_name = cnv.get('name', '')
+                    blip = ci.find('.//a:blip', ns)
+                    rid = blip.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed', '') if blip is not None else ''
+                    if img_name and rid:
+                        target = rid_to_target.get(rid, '')
+                        if target:
+                            media_path = 'xl/' + target
+                            try:
+                                img_bytes = zf.read(media_path)
+                                image_map[img_name] = {
+                                    'bytes': img_bytes,
+                                    'filename': target,
+                                }
+                            except KeyError:
+                                pass
+
+            if not image_map:
+                wb_tmp = openpyxl.load_workbook(tmp_path)
+                ws_tmp = wb_tmp.active
+                for idx, img_obj in enumerate(ws_tmp._images):
+                    from io import BytesIO
+                    buf = BytesIO()
+                    raw_image = img_obj._data()
+                    if hasattr(raw_image, 'save'):
+                        raw_image.save(buf)
+                    else:
+                        buf.write(raw_image)
+                    image_map[f'_img_{idx}'] = {
+                        'bytes': buf.getvalue(),
+                        'filename': getattr(getattr(img_obj, 'ref', None), 'filename', '') or f'image_{idx}.png',
+                    }
+                wb_tmp.close()
+
+        wb = openpyxl.load_workbook(tmp_path)
+        ws = wb.active
+
+        img_col = 1
+        code_col = 2
+        for probe_r in range(2, min(ws.max_row + 1, 10)):
+            v1 = str(ws.cell(row=probe_r, column=1).value or '')
+            v2 = str(ws.cell(row=probe_r, column=2).value or '')
+            if 'DISPIMG' in v1.upper():
+                img_col = 1
+                code_col = 2
+                break
+            if 'DISPIMG' in v2.upper():
+                img_col = 2
+                code_col = 1
+                break
+
+        header = {}
+        for c in range(1, ws.max_column + 1):
+            val = ws.cell(row=1, column=c).value
+            if val:
+                header[c] = str(val).strip().lower()
+        for c, name in header.items():
+            if name == 'code' and c != code_col:
+                code_col = c
+                break
+
+        seen_updates = {}
+        missing_codes = []
+        skipped_rows = []
+        total_entries = 0
+
+        for r in range(2, ws.max_row + 1):
+            codes_text = ws.cell(row=r, column=code_col).value
+            if not codes_text or not str(codes_text).strip():
+                continue
+
+            cell_img = ws.cell(row=r, column=img_col).value
+            img_id = None
+            cell_img_text = str(cell_img or '')
+            if cell_img_text and 'DISPIMG(' in cell_img_text.upper():
+                match = re.search(r'DISPIMG\("([^"]+)"', cell_img_text, re.IGNORECASE)
+                if match:
+                    img_id = match.group(1)
+
+            img_entry = image_map.get(img_id) if img_id else None
+            if not img_entry:
+                if img_id:
+                    skipped_rows.append(f'Row {r}: 未找到图片资源 {img_id}')
+                else:
+                    skipped_rows.append(f'Row {r}: 未识别到图片公式')
+                continue
+
+            codes = [c.strip() for c in str(codes_text).replace('\\n', '\n').split('\n') if c.strip()]
+            if not codes:
+                continue
+
+            total_entries += 1
+
+            try:
+                data_url = _encode_image_bytes_to_data_url(
+                    img_entry['bytes'],
+                    img_entry.get('filename', ''),
+                )
+            except ValueError as exc:
+                skipped_rows.append(f'Row {r}: 图片处理失败 - {exc}')
+                continue
+
+            for code_str in codes:
+                normalized = _normalize_lookup_code(code_str)
+                if not normalized:
+                    skipped_rows.append(f'Row {r}: 编码格式无效 "{code_str}"')
+                    continue
+                target_code = code_lookup.get(normalized)
+                if not target_code:
+                    missing_codes.append(code_str)
+                    continue
+                seen_updates[target_code] = data_url
+
+        wb.close()
+
+        return {
+            'seen_updates': seen_updates,
+            'missing_codes': sorted(dict.fromkeys(missing_codes)),
+            'skipped_rows': skipped_rows,
+            'total_entries': total_entries,
+        }
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
 @fence_material_bp.post('/images/import')
 def import_images_route():
     ensure_permission('database_submit')
@@ -481,27 +657,39 @@ def import_images_route():
         skipped_files = []
         total_entries = 0
 
-        for entry_name, image_bytes in _iter_uploaded_image_entries(file_list):
-            total_entries += 1
-            code_from_name = _extract_code_from_filename(entry_name)
-            normalized = _normalize_lookup_code(code_from_name)
+        excel_file = file_list[0] if len(file_list) == 1 else None
+        excel_filename = (getattr(excel_file, 'filename', '') or '').lower()
+        if excel_file and excel_filename.endswith(('.xlsx', '.xls')):
+            result = _import_images_from_excel(excel_file, code_lookup)
+            if result is not None:
+                seen_updates = result['seen_updates']
+                missing_codes = result['missing_codes']
+                skipped_files = result['skipped_rows']
+                total_entries = result['total_entries']
+            else:
+                return jsonify({'success': False, 'message': 'Excel 图片导入失败'}), 400
+        else:
+            for entry_name, image_bytes in _iter_uploaded_image_entries(file_list):
+                total_entries += 1
+                code_from_name = _extract_code_from_filename(entry_name)
+                normalized = _normalize_lookup_code(code_from_name)
 
-            if not normalized:
-                skipped_files.append(f'{entry_name}: 文件名无法识别编码')
-                continue
+                if not normalized:
+                    skipped_files.append(f'{entry_name}: 文件名无法识别编码')
+                    continue
 
-            target_code = code_lookup.get(normalized)
-            if not target_code:
-                missing_codes.append(code_from_name or entry_name)
-                continue
+                target_code = code_lookup.get(normalized)
+                if not target_code:
+                    missing_codes.append(code_from_name or entry_name)
+                    continue
 
-            try:
-                data_url = _encode_image_bytes_to_data_url(image_bytes, entry_name)
-            except ValueError as exc:
-                skipped_files.append(f'{entry_name}: {exc}')
-                continue
+                try:
+                    data_url = _encode_image_bytes_to_data_url(image_bytes, entry_name)
+                except ValueError as exc:
+                    skipped_files.append(f'{entry_name}: {exc}')
+                    continue
 
-            seen_updates[target_code] = data_url
+                seen_updates[target_code] = data_url
 
         update_payload = [
             {'code': code, 'image_base64': img_b64}

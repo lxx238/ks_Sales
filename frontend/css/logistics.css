@@ -1,0 +1,338 @@
+.logistics-page {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 140px);
+    min-height: 500px;
+}
+.logistics-page .logistics-token-bar {
+    display: flex;
+    gap: 20px;
+    padding: 8px 24px;
+    background: linear-gradient(135deg, #eff6ff 0%, #f5f3ff 100%);
+    color: #64748b;
+    font-size: 12px;
+    flex-shrink: 0;
+    border-radius: 8px;
+    border: 1px solid #dbeafe;
+    margin-bottom: 8px;
+}
+.logistics-page .logistics-token-bar .token-item { display: flex; align-items: center; gap: 4px; }
+.logistics-page .logistics-token-bar .token-value { font-weight: 700; color: #2563eb; font-size: 13px; }
+.logistics-page .logistics-token-bar .token-cost { color: #b45309; font-weight: 600; }
+
+.logistics-split {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    gap: 8px;
+}
+.logistics-left {
+    width: 400px;
+    min-width: 360px;
+    background: white;
+    border-radius: 8px;
+    overflow-y: auto;
+    padding: 16px;
+    flex-shrink: 0;
+    border: 1px solid #e2e8f0;
+}
+.logistics-right {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: white;
+    min-width: 0;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+}
+.logistics-section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1e3c72;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.logistics-form-group { margin-bottom: 10px; }
+.logistics-form-group label {
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+    color: #334155;
+    margin-bottom: 4px;
+}
+.logistics-form-group label .required { color: #ef4444; margin-left: 2px; }
+.logistics-form-group input,
+.logistics-form-group select,
+.logistics-form-group textarea {
+    width: 100%;
+    padding: 7px 10px;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 13px;
+    transition: all 0.2s;
+    font-family: inherit;
+}
+.logistics-form-group input:focus,
+.logistics-form-group select:focus,
+.logistics-form-group textarea:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+.logistics-config-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.logistics-quantity-input {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.logistics-quantity-input input { flex: 1; min-width: 0; }
+.logistics-quantity-unit {
+    min-width: 40px;
+    background: #f8fafc;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 7px 8px;
+    font-size: 12px;
+    color: #475569;
+    text-align: center;
+    font-weight: 500;
+}
+.logistics-upload-area {
+    border: 2px dashed #cbd5e1;
+    border-radius: 10px;
+    padding: 10px 14px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s;
+    background: #fafbfc;
+    position: relative;
+    overflow: hidden;
+}
+.logistics-upload-area:hover { border-color: #667eea; background: #f5f3ff; }
+.logistics-upload-area p { color: #64748b; font-size: 12px; }
+.logistics-upload-area .file-name { margin-top: 4px; font-size: 11px; color: #667eea; font-weight: 500; }
+.logistics-upload-area input[type="file"] {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    opacity: 0;
+    cursor: pointer;
+}
+.logistics-btn-group {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+.logistics-ai-btn {
+    flex: 2;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 30px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+.logistics-ai-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(102, 126, 234, 0.3); }
+.logistics-ai-btn.running { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); }
+.logistics-ai-btn:disabled { opacity: 0.7; cursor: not-allowed; transform: none; }
+.logistics-mode-select {
+    width: auto; min-width: 80px;
+    background: #f8fafc; border: 2px solid #e2e8f0;
+    border-radius: 30px; padding: 7px 10px;
+    font-size: 12px; color: #475569;
+    text-align: center; font-weight: 500;
+    cursor: pointer; outline: none;
+}
+.logistics-stop-btn {
+    flex: 1; background: #ef4444; color: white;
+    border: none; padding: 10px 14px;
+    border-radius: 30px; font-size: 12px; font-weight: 600;
+    cursor: pointer; transition: all 0.3s;
+}
+.logistics-stop-btn:hover { background: #dc2626; }
+.logistics-stop-btn:disabled { background: #9ca3af; cursor: not-allowed; }
+.logistics-progress {
+    margin-top: 8px;
+    display: none;
+    background: linear-gradient(135deg, #eff6ff 0%, #f5f3ff 100%);
+    border-radius: 8px;
+    border: 1px solid #dbeafe;
+    padding: 8px 12px;
+}
+.logistics-progress.active { display: block; }
+.logistics-progress .prog-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.logistics-progress .prog-spinner {
+    width: 14px; height: 14px;
+    border: 2px solid #c7d2fe; border-top-color: #667eea;
+    border-radius: 50%; animation: logistics-spin 0.8s linear infinite;
+}
+.logistics-progress .prog-text { font-size: 11px; color: #64748b; }
+.logistics-progress .prog-bar { height: 3px; background: #e0e7ff; border-radius: 2px; overflow: hidden; }
+.logistics-progress .prog-fill { height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); transition: width 0.3s ease; }
+@keyframes logistics-spin { to { transform: rotate(360deg); } }
+
+.logistics-result-toolbar {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+    border-radius: 8px 8px 0 0;
+}
+.logistics-result-toolbar.visible { display: flex; }
+.logistics-toolbar-stats { display: flex; gap: 14px; margin-right: auto; }
+.logistics-toolbar-stat { font-size: 12px; color: #64748b; }
+.logistics-toolbar-stat b { color: #1e3c72; font-size: 14px; margin-right: 2px; }
+.logistics-action-btn {
+    background: white; border: 1px solid #e2e8f0;
+    padding: 4px 10px; border-radius: 16px;
+    font-size: 11px; font-weight: 500;
+    cursor: pointer; transition: all 0.2s;
+    display: flex; align-items: center; gap: 4px;
+    white-space: nowrap;
+}
+.logistics-action-btn:hover { background: #f0f4ff; border-color: #667eea; color: #667eea; }
+.logistics-action-btn.green { background: #10b981; color: white; border-color: #10b981; }
+.logistics-action-btn.green:hover { background: #059669; border-color: #059669; color: white; }
+
+.logistics-chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.logistics-chat-empty {
+    text-align: center; color: #94a3b8;
+    font-size: 13px; padding: 40px 20px;
+    margin: auto;
+}
+.logistics-chat-msg { display: flex; gap: 6px; }
+.logistics-chat-msg.user { justify-content: flex-end; }
+.logistics-chat-msg.assistant { justify-content: flex-start; }
+.logistics-chat-msg.system { justify-content: center; }
+.logistics-chat-bubble {
+    max-width: 80%;
+    padding: 7px 12px;
+    border-radius: 10px;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.logistics-chat-msg.user .logistics-chat-bubble { background: #667eea; color: white; border-bottom-right-radius: 4px; }
+.logistics-chat-msg.assistant .logistics-chat-bubble { background: #f1f5f9; color: #334155; border-bottom-left-radius: 4px; max-width: 90%; }
+.logistics-chat-msg.system .logistics-chat-bubble { background: transparent; color: #94a3b8; font-size: 11px; padding: 3px 8px; max-width: 100%; text-align: center; }
+.logistics-chat-msg.system.ok .logistics-chat-bubble { color: #10b981; }
+.logistics-chat-msg.system.err .logistics-chat-bubble { color: #ef4444; }
+.logistics-chat-msg.system.info .logistics-chat-bubble { color: #667eea; }
+
+.logistics-json-section {
+    display: none;
+    border-top: 1px solid #e2e8f0;
+    background: white;
+    flex-shrink: 0;
+    max-height: 45vh;
+    overflow-y: auto;
+}
+.logistics-json-section.visible { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; }
+.logistics-json-accordion { border: 1px solid #e2e8f0; border-radius: 6px; margin: 0 8px; overflow: hidden; }
+.logistics-json-accordion-header {
+    display: flex; align-items: center;
+    padding: 5px 10px; background: #f8fafc;
+    cursor: pointer; user-select: none;
+    gap: 6px; font-size: 11px; font-weight: 600; color: #334155;
+}
+.logistics-json-accordion-header:hover { background: #f0f4ff; }
+.logistics-json-accordion-arrow { transition: transform 0.2s; font-size: 9px; color: #94a3b8; }
+.logistics-json-accordion.open .logistics-json-accordion-arrow { transform: rotate(90deg); }
+.logistics-json-accordion-actions { margin-left: auto; display: flex; gap: 4px; }
+.logistics-json-accordion-body { display: none; max-height: 260px; overflow: auto; padding: 6px 10px; }
+.logistics-json-accordion.open .logistics-json-accordion-body { display: block; }
+.logistics-json-edit-btn {
+    padding: 2px 8px; font-size: 10px; font-weight: 500;
+    cursor: pointer; border: 1px solid #cbd5e1;
+    background: white; color: #475569; border-radius: 4px;
+}
+.logistics-json-edit-btn:hover { border-color: #667eea; color: #667eea; }
+.logistics-json-edit-btn.save { background: #10b981; color: white; border-color: #10b981; }
+.logistics-json-edit-btn.cancel { background: #64748b; color: white; border-color: #64748b; }
+.logistics-json-accordion-body pre {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 10px; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-all;
+    color: #334155;
+}
+.logistics-json-editor {
+    width: 100%; min-height: 180px;
+    font-family: 'Consolas', monospace;
+    font-size: 10px; line-height: 1.5;
+    color: #334155; border: 2px solid #667eea;
+    border-radius: 6px; padding: 8px;
+    resize: vertical; outline: none; background: #fafbff;
+}
+.logistics-chat-input-area {
+    padding: 10px 14px;
+    background: white;
+    border-top: 1px solid #e2e8f0;
+    flex-shrink: 0;
+    border-radius: 0 0 8px 8px;
+}
+.logistics-chat-input-row { display: flex; gap: 6px; }
+.logistics-chat-input-row textarea {
+    flex: 1; resize: none; height: 38px; max-height: 80px;
+    padding: 7px 12px; border: 2px solid #e2e8f0;
+    border-radius: 10px; font-size: 12px; font-family: inherit;
+}
+.logistics-chat-input-row textarea:focus { outline: none; border-color: #667eea; }
+.logistics-chat-send-btn {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white; border: none; padding: 7px 14px;
+    border-radius: 10px; font-size: 12px; font-weight: 600;
+    cursor: pointer; transition: all 0.2s; white-space: nowrap;
+}
+.logistics-chat-send-btn:hover { transform: translateY(-1px); }
+.logistics-chat-send-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+.logistics-chat-send-btn.stop { background: #ef4444; }
+.logistics-chat-send-btn.stop:hover { background: #dc2626; }
+.logistics-chat-send-btn.continue-btn { background: #f59e0b; }
+.logistics-chat-send-btn.supplement { background: #3b82f6; }
+.logistics-supplement-panel {
+    display: none;
+    padding: 6px 10px;
+    background: #eff6ff;
+    border-top: 1px solid #bfdbfe;
+    gap: 6px;
+    align-items: center;
+    font-size: 11px;
+    margin-bottom: 4px;
+}
+.logistics-supplement-panel.visible { display: flex; }
+.logistics-supplement-panel input {
+    width: 90px; padding: 5px 8px;
+    border: 2px solid #bfdbfe; border-radius: 6px;
+    font-size: 11px; text-align: center;
+}
+.logistics-supplement-panel input:focus { border-color: #3b82f6; outline: none; }
+.logistics-supplement-panel span { color: #64748b; white-space: nowrap; }
+.logistics-section-divider { border: none; border-top: 1px solid #e2e8f0; margin: 10px 0; }
+
+@media (max-width: 900px) {
+    .logistics-split { flex-direction: column; }
+    .logistics-left { width: 100%; min-width: unset; max-height: 50vh; }
+    .logistics-right { min-height: 50vh; }
+}

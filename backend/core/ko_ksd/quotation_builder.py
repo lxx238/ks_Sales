@@ -238,6 +238,8 @@ def split_and_create_quotations(
                         sheet_prefix = base_prefix
                 else:
                     sheet_prefix = base_prefix
+                if matched_idx is not None:
+                    sheet_prefix = f"({matched_idx + 1}){sheet_prefix}"
 
             effective_matrix_data = build_bom_matrix_data(
                 matrix_data, matched_array, bom_config=config,
@@ -274,6 +276,8 @@ def split_and_create_quotations(
                 result['matched_array'] = matched_array
                 result['matrix_data'] = effective_matrix_data
                 result['set_count'] = effective_matrix_data.get('set_count') or 1
+                if matched_idx is not None:
+                    result['_matrix_idx'] = matched_idx
                 all_quotation_results.append(result)
 
                 pile_prods = result.get('pile_products', [])
@@ -451,6 +455,8 @@ def split_and_create_quotations(
                                 sheet_prefix = base_prefix
                         else:
                             sheet_prefix = base_prefix
+                        if matched_idx is not None:
+                            sheet_prefix = f"({matched_idx + 1}){sheet_prefix}"
 
                     effective_matrix_data = build_bom_matrix_data(
                         matrix_data, matched_array, bom_config=bom_info.get('config'),
@@ -490,6 +496,8 @@ def split_and_create_quotations(
                     result['matched_array'] = matched_array
                     result['matrix_data'] = effective_matrix_data
                     result['set_count'] = effective_matrix_data.get('set_count') or 1
+                    if matched_idx is not None:
+                        result['_matrix_idx'] = matched_idx
                     all_quotation_results.append(result)
 
                     pile_prods = result.get('pile_products', [])
@@ -525,44 +533,30 @@ def split_and_create_quotations(
         for acc in accumulated_results:
             m_idx = acc['matrix_idx']
             matrix_entry = acc['matrix_entry']
-            merged_products = acc['merged_products']
+            selected_boms = acc.get('selected_boms', [])
             accumulated_base = acc['accumulated_base']
+            merged_products = acc.get('merged_products', [])
 
             used_matrix_array_indices.add(m_idx)
 
             ma_rows = matrix_entry.get('rows', '')
             ma_cols = matrix_entry.get('cols', '')
             ma_qty = matrix_entry.get('table_qty', 1)
-            base_prefix = f"{ma_rows}×{ma_cols}_{ma_qty}"
-            same_dim_entries = [
-                e for e in matrix_array_entries
-                if e.get('rows') == ma_rows and e.get('cols') == ma_cols
-                and (e.get('table_qty') or 1) == ma_qty
-            ]
-            if len(same_dim_entries) > 1:
-                ma_miss = matrix_entry.get('missing_per_table', 0) or 0
-                ma_no = matrix_entry.get('no', '')
-                if ma_miss > 0:
-                    sheet_prefix = f"{base_prefix}_缺{ma_miss}"
-                elif ma_no:
-                    sheet_prefix = f"{base_prefix}_{ma_no}"
-                else:
-                    sheet_prefix = base_prefix
-            else:
-                sheet_prefix = base_prefix
+            ma_miss = matrix_entry.get('missing_per_table', 0) or 0
+
+            _accum_group_id = f"{ma_rows}×{ma_cols}_{ma_qty}"
+
+            sheet_prefix = f"{ma_rows}×{ma_cols}_{ma_qty}"
+            sheet_prefix = f"({m_idx + 1}){sheet_prefix}"
+
+            pb_config = (selected_boms[0].get('config') if selected_boms else None) or matrix_entry
+            span_info = pb_config.get('cross_span', '')
 
             effective_matrix_data = build_bom_matrix_data(
-                matrix_data, matrix_entry, bom_config=matrix_entry,
+                matrix_data, matrix_entry, bom_config=pb_config,
             )
-            effective_matrix_data['set_count'] = 1
 
             array_info = f"{ma_rows}×{ma_cols}" if ma_rows and ma_cols else ''
-            span_info = ''
-            for _sb in acc.get('selected_boms', []):
-                _sb_cs = (_sb.get('config') or {}).get('cross_span', '')
-                if _sb_cs:
-                    span_info = str(_sb_cs)
-                    break
 
             try:
                 result = create_ksd_detail_sheet(
@@ -574,7 +568,7 @@ def split_and_create_quotations(
                     image_cache=image_cache,
                     unmatched_products_list=all_unmatched_products,
                     contact_info=contact_info,
-                    config=matrix_entry,
+                    config=pb_config,
                     matrix_data=effective_matrix_data,
                     sale_type=sale_type,
                     ko_discount_rate=ko_discount_rate,
@@ -589,16 +583,25 @@ def split_and_create_quotations(
                     ko_ddp_address=ko_ddp_address,
                     need_weight_code=need_weight_code,
                 )
-                result['config'] = matrix_entry
+                result['config'] = pb_config
                 result['matched_array'] = matrix_entry
                 result['matrix_data'] = effective_matrix_data
-                result['set_count'] = 1
+                result['set_count'] = ma_qty
+                result['_matrix_idx'] = m_idx
+                result['accumulated_group_id'] = _accum_group_id
+                result['accumulated_sub_idx'] = 0
                 all_quotation_results.append(result)
 
+                pile_prods = result.get('pile_products', [])
+                if pile_prods:
+                    for pp in pile_prods:
+                        scaled = dict(pp)
+                        scaled['quantity'] = float(pp.get('quantity', 0)) * ma_qty
+                        pile_products_all.append(scaled)
+
                 print(f"   ✅ KSD accumulated detail: {result['sheet_name']} "
-                      f"(merged {len(acc['selected_boms'])} BOMs, "
-                      f"part1={result.get('part1_price_per_table', 0):.2f}, "
-                      f"part2={result.get('part2_price_per_table', 0):.2f})")
+                      f"({len(selected_boms)} BOMs merged, base={ma_qty}, "
+                      f"part1={result.get('part1_price_per_table', 0):.2f})")
             except Exception as e:
                 import traceback
                 print(f"   ❌ KSD accumulated detail failed: {e}")
@@ -636,6 +639,8 @@ def split_and_create_quotations(
             ma_rows = first_entry.get('rows', '')
             ma_cols = first_entry.get('cols', '')
             sheet_prefix = f"{ma_rows}×{ma_cols}_{bom_base}"
+            if m_indices:
+                sheet_prefix = f"({m_indices[0] + 1}){sheet_prefix}"
 
             _acc_entry = dict(first_entry)
             _acc_entry['table_qty'] = bom_base
@@ -676,6 +681,8 @@ def split_and_create_quotations(
                 result['matched_array'] = first_entry
                 result['matrix_data'] = effective_matrix_data
                 result['set_count'] = bom_base
+                if m_indices:
+                    result['_matrix_idx'] = m_indices[0]
                 all_quotation_results.append(result)
 
                 print(f"   ✅ KSD info-accumulated detail: {result['sheet_name']} "
@@ -736,6 +743,7 @@ def split_and_create_quotations(
             bom_base = matched_pb.get('base_count', 0) or 0
 
             sheet_prefix = f"{info_rows}×{info_cols}_{info_qty}"
+            sheet_prefix = f"({m_idx + 1}){sheet_prefix}"
 
             effective_matrix_data = build_bom_matrix_data(
                 matrix_data, info_entry, bom_config=bom_config,
@@ -773,6 +781,7 @@ def split_and_create_quotations(
                 result['matched_array'] = info_entry
                 result['matrix_data'] = effective_matrix_data
                 result['set_count'] = effective_matrix_data.get('set_count') or 1
+                result['_matrix_idx'] = m_idx
                 all_quotation_results.append(result)
                 print(f"   ✅ KSD indirect detail: {result['sheet_name']} "
                       f"(info {info_rows}×{info_cols}_{info_qty} → BOM base={bom_base}, "

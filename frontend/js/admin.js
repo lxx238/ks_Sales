@@ -95,6 +95,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const koEl = document.getElementById('ko-accounts');
     const jaEl = document.getElementById('ja-accounts');
     const enEl = document.getElementById('en-accounts');
+    const wlEl = document.getElementById('wl-accounts');
     const adminEl = document.getElementById('admin-accounts');
 
     const tableBody = document.getElementById('account-table-body');
@@ -132,6 +133,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (koEl) koEl.textContent = accounts.filter(a => a.group === '韩语组').length;
         if (jaEl) jaEl.textContent = accounts.filter(a => a.group === '日语组').length;
         if (enEl) enEl.textContent = accounts.filter(a => a.group === '英语组').length;
+        if (wlEl) wlEl.textContent = accounts.filter(a => a.group === '物流组').length;
         if (adminEl) adminEl.textContent = accounts.filter(a => a.role === 'admin').length;
     }
 
@@ -155,6 +157,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         '英语业务员': ['quotation', 'cad', 'database', 'records', 'questions'],
         '日语业务员': ['quotation', 'cad', 'database', 'records', 'questions'],
         '业务助理': ['quotation', 'database', 'records'],
+        '物流专员': ['logistics'],
     };
 
     function openForm(title) {

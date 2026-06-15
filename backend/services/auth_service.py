@@ -23,6 +23,7 @@ ROLE_LABEL_TO_KEY = {v: k for k, v in {
     '英语业务员': '英语业务员',
     '日语业务员': '日语业务员',
     '业务助理': '业务助理',
+    '物流专员': '物流专员',
 }.items()}
 
 
@@ -101,7 +102,7 @@ def generate_import_template():
 
 SESSION_USER_KEY = 'ks_auth_username'
 
-ROLE_OPTIONS = {'admin', '韩语业务员', '英语业务员', '日语业务员', '业务助理'}
+ROLE_OPTIONS = {'admin', '韩语业务员', '英语业务员', '日语业务员', '业务助理', '物流专员'}
 
 ALL_PERMISSIONS = [
     'quotation',
@@ -112,6 +113,7 @@ ALL_PERMISSIONS = [
     'records',
     'records_review',
     'questions',
+    'logistics',
 ]
 
 

@@ -1,0 +1,1551 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KSN 智能汇总单生成器 | AI驱动</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+            background: #f0f2f5;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            padding: 14px 24px;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h1 { font-size: 20px; font-weight: 700; }
+        .header p { font-size: 12px; opacity: 0.8; }
+
+        .token-bar {
+            display: flex;
+            gap: 20px;
+            padding: 8px 24px;
+            background: linear-gradient(135deg, #eff6ff 0%, #f5f3ff 100%);
+            color: #64748b;
+            font-size: 12px;
+            flex-shrink: 0;
+            border-bottom: 1px solid #dbeafe;
+        }
+        .token-bar .token-item { display: flex; align-items: center; gap: 4px; }
+        .token-bar .token-value { font-weight: 700; color: #2563eb; font-size: 13px; }
+        .token-bar .token-cost { color: #b45309; font-weight: 600; }
+
+        .split-layout {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .left-panel {
+            width: 420px;
+            min-width: 380px;
+            background: white;
+            border-right: 1px solid #e2e8f0;
+            overflow-y: auto;
+            padding: 20px;
+            flex-shrink: 0;
+        }
+
+        .right-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #f8fafc;
+            min-width: 0;
+        }
+
+        .section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #1e3c72;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .form-group { margin-bottom: 12px; }
+
+        label {
+            display: block;
+            font-size: 12px;
+            font-weight: 500;
+            color: #334155;
+            margin-bottom: 4px;
+        }
+        label .required { color: #ef4444; margin-left: 2px; }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 13px;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .config-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .api-config-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .quantity-input {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .quantity-input input { flex: 1; min-width: 0; }
+        .quantity-unit {
+            min-width: 50px;
+            background: #f8fafc;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 12px;
+            color: #475569;
+            text-align: center;
+            font-weight: 500;
+        }
+
+        .upload-area {
+            border: 2px dashed #cbd5e1;
+            border-radius: 12px;
+            padding: 12px 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #fafbfc;
+            position: relative;
+            overflow: hidden;
+        }
+        .upload-area:hover { border-color: #667eea; background: #f5f3ff; }
+        .upload-area p { color: #64748b; font-size: 12px; }
+        .upload-area .file-name { margin-top: 4px; font-size: 11px; color: #667eea; font-weight: 500; }
+
+        input[type="file"] {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .ai-btn {
+            flex: 2;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 40px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        .ai-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(102, 126, 234, 0.3); }
+        .ai-btn.running { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); }
+        .ai-btn:disabled { opacity: 0.7; cursor: not-allowed; transform: none; }
+
+        .mode-select {
+            width: auto; min-width: 90px;
+            background: #f8fafc; border: 2px solid #e2e8f0;
+            border-radius: 40px; padding: 8px 12px;
+            font-size: 12px; color: #475569;
+            text-align: center; font-weight: 500;
+            cursor: pointer; outline: none;
+        }
+        .mode-select:focus { border-color: #667eea; }
+
+        .stop-btn {
+            flex: 1; background: #ef4444; color: white;
+            border: none; padding: 12px 16px;
+            border-radius: 40px; font-size: 13px; font-weight: 600;
+            cursor: pointer; transition: all 0.3s;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .stop-btn:hover { background: #dc2626; }
+        .stop-btn:disabled { background: #9ca3af; cursor: not-allowed; }
+
+        .inline-progress {
+            margin-top: 10px;
+            display: none;
+            background: linear-gradient(135deg, #eff6ff 0%, #f5f3ff 100%);
+            border-radius: 10px;
+            border: 1px solid #dbeafe;
+            padding: 10px 14px;
+        }
+        .inline-progress.active { display: block; }
+        .inline-progress .prog-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+        .inline-progress .prog-spinner {
+            width: 16px; height: 16px;
+            border: 2px solid #c7d2fe; border-top-color: #667eea;
+            border-radius: 50%; animation: spin 0.8s linear infinite;
+        }
+        .inline-progress .prog-text { font-size: 12px; color: #64748b; }
+        .inline-progress .prog-bar { height: 3px; background: #e0e7ff; border-radius: 2px; overflow: hidden; }
+        .inline-progress .prog-fill { height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); transition: width 0.3s ease; }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .section-divider {
+            border: none;
+            border-top: 1px solid #e2e8f0;
+            margin: 14px 0;
+        }
+
+        /* Right panel */
+        .result-toolbar {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            background: white;
+            border-bottom: 1px solid #e2e8f0;
+            flex-wrap: wrap;
+            flex-shrink: 0;
+        }
+        .result-toolbar.visible { display: flex; }
+
+        .toolbar-stats {
+            display: flex; gap: 14px; margin-right: auto;
+        }
+        .toolbar-stat { font-size: 12px; color: #64748b; }
+        .toolbar-stat b { color: #1e3c72; font-size: 15px; margin-right: 2px; }
+
+        .action-btn {
+            background: white; border: 1px solid #e2e8f0;
+            padding: 5px 12px; border-radius: 20px;
+            font-size: 11px; font-weight: 500;
+            cursor: pointer; transition: all 0.2s;
+            display: flex; align-items: center; gap: 4px;
+            white-space: nowrap;
+        }
+        .action-btn:hover { background: #f8fafc; border-color: #667eea; color: #667eea; }
+        .action-btn.green { background: #10b981; color: white; border-color: #10b981; }
+        .action-btn.green:hover { background: #059669; border-color: #059669; color: white; }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .chat-empty {
+            text-align: center; color: #94a3b8;
+            font-size: 13px; padding: 40px 20px;
+            margin: auto;
+        }
+
+        .chat-msg { display: flex; gap: 8px; }
+        .chat-msg.user { justify-content: flex-end; }
+        .chat-msg.assistant { justify-content: flex-start; }
+        .chat-msg.system { justify-content: center; }
+
+        .chat-bubble {
+            max-width: 80%;
+            padding: 8px 14px;
+            border-radius: 12px;
+            font-size: 13px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .chat-msg.user .chat-bubble {
+            background: #667eea; color: white;
+            border-bottom-right-radius: 4px;
+        }
+        .chat-msg.assistant .chat-bubble {
+            background: white; color: #334155;
+            border-bottom-left-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+            max-width: 90%;
+        }
+        .chat-msg.system .chat-bubble {
+            background: transparent; color: #94a3b8;
+            font-size: 12px; padding: 4px 10px;
+            max-width: 100%; text-align: center;
+        }
+        .chat-msg.system.ok .chat-bubble { color: #10b981; }
+        .chat-msg.system.err .chat-bubble { color: #ef4444; }
+        .chat-msg.system.info .chat-bubble { color: #667eea; }
+
+        .json-result-section {
+            display: none;
+            border-top: 1px solid #e2e8f0;
+            background: white;
+            flex-shrink: 0;
+            max-height: 50vh;
+            overflow-y: auto;
+        }
+        .json-result-section.visible { display: flex; flex-direction: column; gap: 4px; padding: 4px 0; }
+
+        .json-accordion {
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            margin: 0 8px;
+            overflow: hidden;
+        }
+        .json-accordion-header {
+            display: flex;
+            align-items: center;
+            padding: 6px 12px;
+            background: #f8fafc;
+            cursor: pointer;
+            user-select: none;
+            gap: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #334155;
+        }
+        .json-accordion-header:hover { background: #f0f4ff; }
+        .json-accordion-arrow {
+            transition: transform 0.2s;
+            font-size: 10px;
+            color: #94a3b8;
+        }
+        .json-accordion.open .json-accordion-arrow { transform: rotate(90deg); }
+        .json-accordion-actions {
+            margin-left: auto;
+            display: flex;
+            gap: 4px;
+        }
+        .json-accordion-body {
+            display: none;
+            max-height: 300px;
+            overflow: auto;
+            padding: 8px 12px;
+        }
+        .json-accordion.open .json-accordion-body { display: block; }
+
+        .json-edit-btn {
+            padding: 3px 10px; font-size: 11px; font-weight: 500;
+            cursor: pointer; border: 1px solid #cbd5e1;
+            background: white; color: #475569; border-radius: 4px;
+            margin: auto 4px;
+        }
+        .json-edit-btn:hover { border-color: #667eea; color: #667eea; }
+        .json-edit-btn.save { background: #10b981; color: white; border-color: #10b981; }
+        .json-edit-btn.cancel { background: #64748b; color: white; border-color: #64748b; }
+
+        .json-accordion-body pre {
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 11px; line-height: 1.5;
+            white-space: pre-wrap; word-break: break-all;
+            color: #334155;
+        }
+
+        .json-editor {
+            width: 100%; min-height: 200px;
+            font-family: 'Consolas', monospace;
+            font-size: 11px; line-height: 1.5;
+            color: #334155; border: 2px solid #667eea;
+            border-radius: 6px; padding: 10px;
+            resize: vertical; outline: none; background: #fafbff;
+        }
+
+        .chat-input-area {
+            padding: 12px 16px;
+            background: white;
+            border-top: 1px solid #e2e8f0;
+            flex-shrink: 0;
+        }
+        .chat-input-row { display: flex; gap: 8px; }
+        .chat-input-row textarea {
+            flex: 1; resize: none; height: 42px; max-height: 100px;
+            padding: 9px 14px; border: 2px solid #e2e8f0;
+            border-radius: 12px; font-size: 13px; font-family: inherit;
+        }
+        .chat-input-row textarea:focus { outline: none; border-color: #667eea; }
+
+        .chat-send-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; border: none; padding: 9px 18px;
+            border-radius: 12px; font-size: 13px; font-weight: 600;
+            cursor: pointer; transition: all 0.2s; white-space: nowrap;
+        }
+        .chat-send-btn:hover { transform: translateY(-1px); }
+        .chat-send-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        #chatStopBtn { background: #ef4444; }
+        #chatStopBtn:hover { background: #dc2626; }
+        #chatContinueBtn {
+            background: #f59e0b; color: white;
+            border: none; padding: 9px 14px;
+            border-radius: 12px; font-size: 12px; font-weight: 600;
+            cursor: pointer; transition: all 0.2s; white-space: nowrap;
+            display: none;
+        }
+        #chatContinueBtn:hover { background: #d97706; transform: translateY(-1px); }
+        .supplement-btn {
+            background: #3b82f6; color: white;
+            border: none; padding: 9px 14px;
+            border-radius: 12px; font-size: 12px; font-weight: 600;
+            cursor: pointer; transition: all 0.2s; white-space: nowrap;
+        }
+        .supplement-btn:hover { background: #2563eb; transform: translateY(-1px); }
+        .supplement-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .supplement-panel {
+            display: none;
+            padding: 8px 12px;
+            background: #eff6ff;
+            border-top: 1px solid #bfdbfe;
+            gap: 8px;
+            align-items: center;
+            font-size: 12px;
+        }
+        .supplement-panel.visible { display: flex; }
+        .supplement-panel input {
+            width: 100px; padding: 6px 10px;
+            border: 2px solid #bfdbfe; border-radius: 8px;
+            font-size: 12px; text-align: center;
+        }
+        .supplement-panel input:focus { border-color: #3b82f6; outline: none; }
+        .supplement-panel span { color: #64748b; white-space: nowrap; }
+        .supplement-go-btn {
+            background: #3b82f6; color: white;
+            border: none; padding: 6px 14px;
+            border-radius: 8px; font-size: 12px; font-weight: 600;
+            cursor: pointer; white-space: nowrap;
+        }
+        .supplement-go-btn:hover { background: #2563eb; }
+        .supplement-cancel-btn {
+            background: transparent; color: #64748b;
+            border: 1px solid #cbd5e1; padding: 6px 10px;
+            border-radius: 8px; font-size: 12px; cursor: pointer;
+        }
+
+        .toast {
+            position: fixed; bottom: 24px; right: 24px;
+            background: #1e293b; color: white;
+            padding: 10px 20px; border-radius: 40px;
+            font-size: 13px; display: flex; align-items: center; gap: 8px;
+            z-index: 1001; animation: slideIn 0.3s ease;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        }
+        .toast.success { background: linear-gradient(135deg, #10b981, #059669); }
+        .toast.error { background: linear-gradient(135deg, #ef4444, #dc2626); }
+        .toast.warning { background: linear-gradient(135deg, #f59e0b, #d97706); }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        @media (max-width: 900px) {
+            .split-layout { flex-direction: column; }
+            .left-panel { width: 100%; min-width: unset; max-height: 50vh; }
+            .right-panel { min-height: 50vh; }
+            .config-grid { grid-template-columns: 1fr 1fr; }
+            .api-config-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 640px) {
+            .left-panel { padding: 14px; }
+            .config-grid { grid-template-columns: 1fr; }
+            .button-group { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>KSN 智能汇总单</h1>
+        <p>AI 驱动 · PDF解析 · 自动生成JSON · 智能汇总</p>
+    </div>
+
+    <div class="token-bar">
+        <div class="token-item">
+            <span class="token-label">输入</span>
+            <span class="token-value" id="tokenIn">0</span>
+        </div>
+        <div class="token-item">
+            <span class="token-label">输出</span>
+            <span class="token-value" id="tokenOut">0</span>
+        </div>
+        <div class="token-item">
+            <span class="token-label">总Token</span>
+            <span class="token-value" id="tokenTotal">0</span>
+        </div>
+        <div class="token-item">
+            <span class="token-label">调用次数</span>
+            <span class="token-value" id="tokenCalls">0</span>
+        </div>
+        <div style="flex:1;"></div>
+        <div class="token-item">
+            <span class="token-label">预估费用</span>
+            <span class="token-cost" id="tokenCost">¥0.00</span>
+        </div>
+    </div>
+
+    <div class="split-layout">
+        <div class="left-panel">
+            <details class="api-section" style="margin-bottom: 0;">
+                <summary class="section-title" style="cursor:pointer; user-select:none;">API 配置</summary>
+                <div class="api-config-grid" style="margin-top: 10px;">
+                    <div class="form-group">
+                        <label>API Base URL</label>
+                        <input type="text" id="apiBaseUrl" value="https://open.bigmodel.cn/api/anthropic">
+                    </div>
+                    <div class="form-group">
+                        <label>API Key</label>
+                        <input type="password" id="apiKey" value="ce3cb32501964392ac95daae09cbf8f9.jg7ypsXoBTZccnp3">
+                    </div>
+                    <div class="form-group">
+                        <label>模型</label>
+                        <select id="modelSelect">
+                            <option value="glm-5.1" selected>glm-5.1 (最新)</option>
+                            <option value="glm-5">glm-5</option>
+                            <option value="glm-4v-flash">glm-4v-flash (免费)</option>
+                            <option value="glm-4v-plus">glm-4v-plus</option>
+                            <option value="kimi-k2.6">kimi-k2.6</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>MAIN MARK</label>
+                        <input type="text" id="mainMark" value="KSN-SN20260305-MG-01S">
+                    </div>
+                </div>
+            </details>
+
+            <hr class="section-divider">
+            <div class="section-title">物料参数</div>
+
+            <div class="config-grid">
+                <div class="form-group">
+                    <label>托盘数量 <span class="required">*</span></label>
+                    <div class="quantity-input">
+                        <input type="number" id="palletQty" placeholder="总数" value="" min="1">
+                        <span class="quantity-unit">个</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>托盘备注</label>
+                    <input type="text" id="palletRemarks" placeholder="01-141#、142-143#">
+                </div>
+                <div class="form-group">
+                    <label>英文单套预装明细</label>
+                    <div class="quantity-input">
+                        <input type="number" id="kitQty" placeholder="数量" value="" min="0">
+                        <span class="quantity-unit">个</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>英文套装备注</label>
+                    <input type="text" id="kitRemarks" placeholder="PSM-38164-PZ05...">
+                </div>
+                <div class="form-group">
+                    <label>中文包装清单参考</label>
+                    <div class="quantity-input">
+                        <input type="number" id="chineseQty" placeholder="数量" value="" min="0">
+                        <span class="quantity-unit">个</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>中文清单备注</label>
+                    <input type="text" id="chineseRemarks" placeholder="车棚加长项目...">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>上传 PDF 排柜图 <span class="required">*</span></label>
+                <div class="upload-area" id="uploadArea">
+                    <p>点击上传 PDF 文件（排柜图）</p>
+                    <p style="font-size: 11px; margin-top: 2px;">支持格式：.pdf，最大 20MB</p>
+                    <input type="file" id="pdfFile" accept=".pdf">
+                    <div class="file-name" id="pdfFileName"></div>
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button class="ai-btn" id="aiBtn" onclick="sendToAI(document.getElementById('sendMode').value)">
+                    AI 自动提取编排
+                </button>
+                <select id="sendMode" class="mode-select">
+                    <option value="text" selected>仅文本</option>
+                    <option value="both">图片+文本</option>
+                    <option value="image">仅图片</option>
+                </select>
+                <button class="stop-btn" id="stopBtn" onclick="stopAI()" disabled>
+                    停止
+                </button>
+            </div>
+
+            <div class="inline-progress" id="inlineProgress">
+                <div class="prog-header">
+                    <div class="prog-spinner"></div>
+                    <span class="prog-text" id="aiProgressText">等待中...</span>
+                </div>
+                <div class="prog-bar"><div class="prog-fill" id="progressFill" style="width: 0%"></div></div>
+            </div>
+        </div>
+
+        <div class="right-panel">
+            <div class="result-toolbar" id="resultToolbar">
+                <div class="toolbar-stats">
+                    <span class="toolbar-stat"><b id="statPallet">0</b>托盘</span>
+                    <span class="toolbar-stat"><b id="statEnglish">0</b>英文套装</span>
+                    <span class="toolbar-stat"><b id="statChinese">0</b>中文清单</span>
+                </div>
+                <button class="action-btn green" onclick="runPythonScript('en')">生成英文Excel</button>
+                <button class="action-btn green" onclick="runPythonScript('ja')">生成日文Excel</button>
+                <button class="action-btn" id="downloadEnBtn" style="display:none;" onclick="downloadExcel('en')">下载英文</button>
+                <button class="action-btn" id="downloadJaBtn" style="display:none;" onclick="downloadExcel('ja')">下载日文</button>
+                <button class="action-btn" onclick="downloadAllJSON()">下载JSON</button>
+                <button class="action-btn" id="toggleJsonBtn" onclick="toggleJsonPanel()">JSON面板</button>
+            </div>
+
+            <div class="chat-messages" id="chatMessages">
+                <div class="chat-empty" id="chatEmpty">上传PDF并点击「AI 自动询价」开始，或在下方直接输入消息</div>
+            </div>
+
+            <div class="json-result-section" id="jsonResultSection">
+                <div class="json-accordion" id="accordion-pallet">
+                    <div class="json-accordion-header" onclick="toggleAccordion('pallet')">
+                        <span class="json-accordion-arrow">&#9654;</span>
+                        <span>托盘清单.json</span>
+                        <span id="count-pallet" style="font-weight:400;color:#94a3b8;font-size:11px;"></span>
+                        <div class="json-accordion-actions">
+                            <button class="json-edit-btn" id="editBtn-pallet" onclick="event.stopPropagation();toggleAccordionEdit('pallet')">编辑</button>
+                            <button class="json-edit-btn save" id="saveBtn-pallet" onclick="event.stopPropagation();saveAccordionEdit('pallet')" style="display:none;">保存</button>
+                            <button class="json-edit-btn cancel" id="cancelBtn-pallet" onclick="event.stopPropagation();cancelAccordionEdit('pallet')" style="display:none;">取消</button>
+                        </div>
+                    </div>
+                    <div class="json-accordion-body">
+                        <pre id="display-pallet"></pre>
+                        <textarea id="editor-pallet" class="json-editor" style="display:none;" spellcheck="false"></textarea>
+                    </div>
+                </div>
+                <div class="json-accordion" id="accordion-english">
+                    <div class="json-accordion-header" onclick="toggleAccordion('english')">
+                        <span class="json-accordion-arrow">&#9654;</span>
+                        <span>英文单套预装明细.json</span>
+                        <span id="count-english" style="font-weight:400;color:#94a3b8;font-size:11px;"></span>
+                        <div class="json-accordion-actions">
+                            <button class="json-edit-btn" id="editBtn-english" onclick="event.stopPropagation();toggleAccordionEdit('english')">编辑</button>
+                            <button class="json-edit-btn save" id="saveBtn-english" onclick="event.stopPropagation();saveAccordionEdit('english')" style="display:none;">保存</button>
+                            <button class="json-edit-btn cancel" id="cancelBtn-english" onclick="event.stopPropagation();cancelAccordionEdit('english')" style="display:none;">取消</button>
+                        </div>
+                    </div>
+                    <div class="json-accordion-body">
+                        <pre id="display-english"></pre>
+                        <textarea id="editor-english" class="json-editor" style="display:none;" spellcheck="false"></textarea>
+                    </div>
+                </div>
+                <div class="json-accordion" id="accordion-chinese">
+                    <div class="json-accordion-header" onclick="toggleAccordion('chinese')">
+                        <span class="json-accordion-arrow">&#9654;</span>
+                        <span>中文包装清单参考.json</span>
+                        <span id="count-chinese" style="font-weight:400;color:#94a3b8;font-size:11px;"></span>
+                        <div class="json-accordion-actions">
+                            <button class="json-edit-btn" id="editBtn-chinese" onclick="event.stopPropagation();toggleAccordionEdit('chinese')">编辑</button>
+                            <button class="json-edit-btn save" id="saveBtn-chinese" onclick="event.stopPropagation();saveAccordionEdit('chinese')" style="display:none;">保存</button>
+                            <button class="json-edit-btn cancel" id="cancelBtn-chinese" onclick="event.stopPropagation();cancelAccordionEdit('chinese')" style="display:none;">取消</button>
+                        </div>
+                    </div>
+                    <div class="json-accordion-body">
+                        <pre id="display-chinese"></pre>
+                        <textarea id="editor-chinese" class="json-editor" style="display:none;" spellcheck="false"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chat-input-area">
+                <div class="supplement-panel" id="supplementPanel">
+                    <span>补充PDF页码:</span>
+                    <input type="text" id="supplementPages" placeholder="如: 4-6 或 1,3,5-7，按回车发送" onkeydown="if(event.key==='Enter'){event.preventDefault();doSupplement();}">
+                    <button class="supplement-cancel-btn" onclick="toggleSupplementPanel()">取消</button>
+                </div>
+                <div class="chat-input-row">
+                    <textarea id="chatInput" placeholder="输入消息，如：请你单独补充剩下的21#-29#托盘..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();handleSend();}"></textarea>
+                    <button class="chat-send-btn" id="chatSendBtn" onclick="handleSend()">发送</button>
+                    <button class="chat-send-btn" id="chatStopBtn" onclick="stopChat()" style="display:none;">停止</button>
+                    <button id="chatContinueBtn" onclick="continueOutput()">继续输出</button>
+                    <button class="supplement-btn" id="supplementBtn" onclick="toggleSupplementPanel()">补充页面</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isRunning = false;
+        let abortController = null;
+        let chatAbortController = null;
+        let chatStreamActive = false;
+        let chatStreamReader = null;
+        let generatedJSONs = { pallet: null, english: null, chinese: null };
+        let sessionId = '';
+        let chatMessages = [];
+        let tokenStats = { input: 0, output: 0, calls: 0 };
+
+        const tabFileNames = {
+            pallet: '托盘清单.json',
+            english: '英文单套预装明细.json',
+            chinese: '中文包装清单参考.json'
+        };
+
+        async function ensureSession() {
+            if (sessionId) return sessionId;
+            try {
+                const resp = await fetch('/api/session', { method: 'POST' });
+                const data = await resp.json();
+                if (data.ok) sessionId = data.sessionId;
+            } catch (e) {}
+            return sessionId;
+        }
+
+        function updateDownloadLinks() {
+            document.querySelectorAll('.session-download').forEach(el => {
+                const file = el.getAttribute('data-file');
+                el.setAttribute('onclick', `window.open('/api/download/${sessionId}/${file}')`);
+            });
+        }
+
+        function updateProgress(progress, message) {
+            const fill = document.getElementById('progressFill');
+            const text = document.getElementById('aiProgressText');
+            if (fill) fill.style.width = `${progress}%`;
+            if (text && message) text.textContent = message;
+        }
+
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `<span>${type === 'success' ? 'OK' : type === 'error' ? 'X' : '!'}</span> ${message}`;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        function addChatMsg(role, content, extraClass) {
+            chatMessages.push({ role, content, extraClass: extraClass || '' });
+            const el = document.getElementById('chatMessages');
+            const empty = document.getElementById('chatEmpty');
+            if (empty) empty.style.display = 'none';
+            const escaped = content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const cls = [role, extraClass || ''].filter(Boolean).join(' ');
+            const div = document.createElement('div');
+            div.className = `chat-msg ${cls}`;
+            div.innerHTML = `<div class="chat-bubble">${escaped}</div>`;
+            el.appendChild(div);
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function updateLastMsg(content) {
+            if (chatMessages.length === 0) return;
+            chatMessages[chatMessages.length - 1].content = content;
+            const el = document.getElementById('chatMessages');
+            const bubbles = el.querySelectorAll('.chat-msg.assistant .chat-bubble');
+            if (bubbles.length > 0) {
+                bubbles[bubbles.length - 1].textContent = content;
+            }
+        }
+
+        function showContinueBtn() {
+            const last = chatMessages[chatMessages.length - 1];
+            if (!last || last.role !== 'assistant' || !last.content) return;
+            document.getElementById('chatContinueBtn').style.display = '';
+        }
+
+        function hideContinueBtn() {
+            document.getElementById('chatContinueBtn').style.display = 'none';
+        }
+
+        async function continueOutput() {
+            if (!sessionId) return;
+            hideContinueBtn();
+
+            let lastAssistant = '';
+            for (let i = chatMessages.length - 1; i >= 0; i--) {
+                if (chatMessages[i].role === 'assistant' && chatMessages[i].content) {
+                    lastAssistant = chatMessages[i].content;
+                    break;
+                }
+            }
+            const tail = lastAssistant.slice(-3000);
+            const prompt = `你上次的输出在下面这段内容处中断了，请从中断处继续输出，不要重复已有内容。如果之前的JSON数组没有写完，请从最后一个未完成的数组继续。不要从头开始。\n\n--- 上次输出的末尾 ---\n${tail}\n--- 末尾结束 ---`;
+
+            document.getElementById('chatSendBtn').style.display = 'none';
+            document.getElementById('chatStopBtn').style.display = '';
+
+            addChatMsg('user', '(继续输出)');
+            addChatMsg('assistant', '');
+
+            chatAbortController = new AbortController();
+
+            try {
+                const resp = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionId: sessionId, message: prompt }),
+                    signal: chatAbortController.signal
+                });
+
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let fullReply = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        let evt;
+                        try { evt = JSON.parse(line.slice(6)); } catch(e) { continue; }
+
+                        if (evt.type === 'token') {
+                            fullReply += evt.text;
+                            updateLastMsg(fullReply);
+                        } else if (evt.type === 'done') {
+                            chatMessages[chatMessages.length - 1].content = evt.reply || fullReply;
+                            if (evt.updated) {
+                                applyJsonUpdate(evt);
+                            }
+                            if (evt.tokens) addTokens(evt.tokens.input, evt.tokens.output);
+                        } else if (evt.type === 'error') {
+                            chatMessages[chatMessages.length - 1].content = `[错误] ${evt.msg}`;
+                        }
+                    }
+                }
+
+                if (!chatMessages[chatMessages.length - 1].content && fullReply) {
+                    chatMessages[chatMessages.length - 1].content = fullReply;
+                }
+
+            } catch (e) {
+                if (e.name === 'AbortError') {
+                    if (!chatMessages[chatMessages.length - 1].content) {
+                        chatMessages[chatMessages.length - 1].content = '[已停止]';
+                    }
+                } else {
+                    chatMessages[chatMessages.length - 1].content = `[网络错误] ${e.message}`;
+                }
+            }
+
+            chatAbortController = null;
+            renderChatMessages();
+            document.getElementById('chatStopBtn').style.display = 'none';
+            document.getElementById('chatSendBtn').style.display = '';
+            document.getElementById('chatSendBtn').disabled = false;
+            showContinueBtn();
+            document.getElementById('chatInput').focus();
+        }
+
+        function renderChatMessages() {
+            const el = document.getElementById('chatMessages');
+            const empty = document.getElementById('chatEmpty');
+            if (chatMessages.length === 0) {
+                if (empty) empty.style.display = '';
+                return;
+            }
+            if (empty) empty.style.display = 'none';
+
+            el.innerHTML = chatMessages.map(m => {
+                const escaped = m.content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                const cls = [m.role, m.extraClass || ''].filter(Boolean).join(' ');
+                return `<div class="chat-msg ${cls}"><div class="chat-bubble">${escaped}</div></div>`;
+            }).join('');
+            el.scrollTop = el.scrollHeight;
+        }
+
+        document.getElementById('modelSelect').addEventListener('change', function(e) {
+            const model = e.target.value;
+            const urlInput = document.getElementById('apiBaseUrl');
+            const keyInput = document.getElementById('apiKey');
+            if (model === 'kimi-k2.6') {
+                urlInput.value = 'https://api.moonshot.cn/v1';
+                keyInput.value = 'sk-kimi-NO30oeeIDGEYtBeuqU5awSbb3vdtt5evkpMprYo5emfZtQCNtthx2HKmKUApA5nn';
+            } else {
+                urlInput.value = 'https://open.bigmodel.cn/api/anthropic';
+                keyInput.value = 'ce3cb32501964392ac95daae09cbf8f9.jg7ypsXoBTZccnp3';
+            }
+        });
+
+        document.getElementById('pdfFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            const fileNameSpan = document.getElementById('pdfFileName');
+            if (file) {
+                if (file.type !== 'application/pdf') {
+                    showToast('请上传PDF文件', 'error');
+                    this.value = '';
+                    fileNameSpan.innerHTML = '';
+                    return;
+                }
+                if (file.size > 20 * 1024 * 1024) {
+                    showToast('文件大小不能超过20MB', 'error');
+                    this.value = '';
+                    fileNameSpan.innerHTML = '';
+                    return;
+                }
+                fileNameSpan.innerHTML = `已选择: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+                showToast(`已选择文件: ${file.name}`, 'success');
+            } else {
+                fileNameSpan.innerHTML = '';
+            }
+        });
+
+        function stopAI() {
+            if (abortController) {
+                abortController.abort();
+                abortController = null;
+            }
+            isRunning = false;
+            document.getElementById('inlineProgress').classList.remove('active');
+            setButtonsDisabled(false);
+            setRunningButton(false);
+            document.getElementById('stopBtn').disabled = true;
+            showToast('AI 处理已停止', 'warning');
+            addChatMsg('system', '用户停止了AI处理', 'err');
+        }
+
+        function stopChat() {
+            chatStreamActive = false;
+            if (chatStreamReader) {
+                try { chatStreamReader.cancel(); } catch(e) {}
+                chatStreamReader = null;
+            }
+            if (chatAbortController) {
+                chatAbortController.abort();
+                chatAbortController = null;
+            }
+            document.getElementById('chatStopBtn').style.display = 'none';
+            document.getElementById('chatSendBtn').style.display = '';
+            document.getElementById('chatSendBtn').disabled = false;
+            showToast('AI 对话已停止', 'warning');
+            if (chatMessages.length > 0 && !chatMessages[chatMessages.length - 1].content) {
+                chatMessages[chatMessages.length - 1].content = '[已停止]';
+                renderChatMessages();
+            }
+        }
+
+        function setButtonsDisabled(disabled) {
+            document.getElementById('aiBtn').disabled = disabled;
+            document.getElementById('sendMode').disabled = disabled;
+        }
+
+        function setRunningButton(running) {
+            const btn = document.getElementById('aiBtn');
+            if (running) btn.classList.add('running');
+            else btn.classList.remove('running');
+        }
+
+        function toggleJsonPanel() {
+            const section = document.getElementById('jsonResultSection');
+            section.classList.toggle('visible');
+        }
+
+        async function sendToAI(mode = 'both') {
+            if (isRunning) {
+                showToast('AI 正在处理中，请稍后或点击停止', 'warning');
+                return;
+            }
+
+            const pdfFile = document.getElementById('pdfFile').files[0];
+            const palletQty = parseInt(document.getElementById('palletQty').value) || 0;
+            const kitQty = parseInt(document.getElementById('kitQty').value) || 0;
+            const chineseQty = parseInt(document.getElementById('chineseQty').value) || 0;
+            const palletRemarks = document.getElementById('palletRemarks').value || '';
+            const kitRemarks = document.getElementById('kitRemarks').value || '';
+            const chineseRemarks = document.getElementById('chineseRemarks').value || '';
+            const apiBase = document.getElementById('apiBaseUrl').value.trim().replace(/\/$/, '');
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const model = document.getElementById('modelSelect').value;
+
+            if (!pdfFile) { showToast('请上传PDF文件', 'error'); return; }
+            if (palletQty <= 0) { showToast('请输入托盘数量', 'error'); return; }
+            if (!apiKey) { showToast('请输入API Key', 'error'); return; }
+
+            chatMessages = [];
+            generatedJSONs = { pallet: null, english: null, chinese: null };
+            generatedFilenames = { en: null, ja: null };
+            editingState = { pallet: false, english: false, chinese: false };
+            tokenStats = { input: 0, output: 0, calls: 0 };
+            updateTokenDisplay();
+            document.getElementById('chatMessages').innerHTML = '';
+            const emptyEl = document.getElementById('chatEmpty');
+            if (emptyEl) emptyEl.style.display = '';
+            document.getElementById('resultToolbar').classList.remove('visible');
+            document.getElementById('jsonResultSection').classList.remove('visible');
+            document.getElementById('downloadEnBtn').style.display = 'none';
+            document.getElementById('downloadJaBtn').style.display = 'none';
+            hideContinueBtn();
+            sessionId = '';
+
+            await ensureSession();
+            if (!sessionId) {
+                showToast('无法创建会话，请检查服务是否运行', 'error');
+                return;
+            }
+
+            isRunning = true;
+            document.getElementById('inlineProgress').classList.add('active');
+            setButtonsDisabled(true);
+            setRunningButton(true);
+            document.getElementById('stopBtn').disabled = false;
+            hideContinueBtn();
+
+            const modeLabels = { both: '图片+文本', image: '仅图片', text: '仅文本' };
+            addChatMsg('system', `开始处理 PDF: ${pdfFile.name} | 模式: ${modeLabels[mode]} | 模型: ${model}`, 'info');
+            addChatMsg('system', `托盘: ${palletQty}个, 英文套装: ${kitQty}个, 中文清单: ${chineseQty}个`, 'info');
+
+            try {
+                abortController = new AbortController();
+                const formData = new FormData();
+                formData.append('pdf', pdfFile);
+                formData.append('palletQty', palletQty);
+                formData.append('kitQty', kitQty);
+                formData.append('chineseQty', chineseQty);
+                formData.append('palletRemarks', palletRemarks);
+                formData.append('kitRemarks', kitRemarks);
+                formData.append('chineseRemarks', chineseRemarks);
+                formData.append('apiBase', apiBase);
+                formData.append('apiKey', apiKey);
+                formData.append('model', model);
+                formData.append('sendMode', mode);
+                formData.append('sessionId', sessionId);
+
+                updateProgress(10, '正在连接后端...');
+
+                const response = await fetch('/api/generate', {
+                    method: 'POST',
+                    body: formData,
+                    signal: abortController.signal
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let progress = 10;
+                let streamReply = '';
+                let hasAssistantMsg = false;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        let evt;
+                        try { evt = JSON.parse(line.slice(6)); } catch(e) { continue; }
+
+                        if (evt.type === 'status') {
+                            addChatMsg('system', evt.msg, 'info');
+                        } else if (evt.type === 'send') {
+                            addChatMsg('system', `已发送: ${evt.label}`, 'info');
+                            progress = Math.min(progress + 5, 30);
+                            updateProgress(progress, `已发送: ${evt.label}...`);
+                            addChatMsg('assistant', '');
+                            hasAssistantMsg = true;
+                            streamReply = '';
+                        } else if (evt.type === 'token') {
+                            streamReply += evt.text;
+                            updateLastMsg(streamReply);
+                            if (streamReply.length % 200 < evt.text.length) {
+                                progress = Math.min(30 + (streamReply.length / 200) % 50, 80);
+                                updateProgress(progress, `AI 回复中... (${streamReply.length} 字)`);
+                            }
+                        } else if (evt.type === 'recv') {
+                            if (evt.tokens) addTokens(evt.tokens.input, evt.tokens.output);
+                            progress = Math.min(progress + 5, 90);
+                            updateProgress(progress, '收到完整AI回复，解析中...');
+                        } else if (evt.type === 'parsed') {
+                            addChatMsg('system', evt.msg, evt.ok ? 'ok' : 'err');
+                        } else if (evt.type === 'done') {
+                            const saved = evt.saved || {};
+                            addChatMsg('system', `保存完成 - 托盘:${saved.pallet||0} 套装:${saved.english||0} 清单:${saved.chinese||0}`, 'ok');
+                            generatedJSONs = { pallet: evt.pallet, english: evt.english, chinese: evt.chinese };
+                            updateProgress(100, '处理完成！');
+                        } else if (evt.type === 'error') {
+                            throw new Error(evt.msg);
+                        }
+                    }
+                }
+
+                await new Promise(r => setTimeout(r, 200));
+                renderResults(generatedJSONs);
+                updateDownloadLinks();
+                document.getElementById('jsonResultSection').classList.add('visible');
+                const s = (generatedJSONs.pallet&&generatedJSONs.pallet.length?1:0)+(generatedJSONs.english&&generatedJSONs.english.length?1:0)+(generatedJSONs.chinese&&generatedJSONs.chinese.length?1:0);
+                showToast(`${s}/3 个JSON已生成`, 'success');
+                showContinueBtn();
+
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    addChatMsg('system', '请求已取消', 'err');
+                } else {
+                    addChatMsg('system', `错误: ${error.message}`, 'err');
+                    showToast('处理失败: ' + error.message, 'error');
+                }
+            } finally {
+                document.getElementById('inlineProgress').classList.remove('active');
+                setButtonsDisabled(false);
+                setRunningButton(false);
+                document.getElementById('stopBtn').disabled = true;
+                isRunning = false;
+                abortController = null;
+            }
+        }
+
+        function renderResults(data) {
+            document.getElementById('resultToolbar').classList.add('visible');
+            document.getElementById('statPallet').textContent = data.pallet ? data.pallet.length : 0;
+            document.getElementById('statEnglish').textContent = data.english ? data.english.length : 0;
+            document.getElementById('statChinese').textContent = data.chinese ? data.chinese.length : 0;
+            refreshAllAccordions();
+        }
+
+        function refreshAllAccordions() {
+            ['pallet', 'english', 'chinese'].forEach(key => {
+                const data = generatedJSONs[key];
+                const countEl = document.getElementById(`count-${key}`);
+                if (countEl) countEl.textContent = data && data.length ? `(${data.length}条)` : '(空)';
+                const display = document.getElementById(`display-${key}`);
+                if (display && !editingState[key]) {
+                    display.textContent = data ? JSON.stringify(data, null, 2) : '// 未能提取此JSON';
+                }
+            });
+        }
+
+        let editingState = { pallet: false, english: false, chinese: false };
+
+        function toggleAccordion(key) {
+            if (editingState[key]) return;
+            const el = document.getElementById(`accordion-${key}`);
+            el.classList.toggle('open');
+        }
+
+        function toggleAccordionEdit(key) {
+            if (editingState[key]) return;
+            const data = generatedJSONs[key];
+            if (!data) { showToast('无数据可编辑', 'error'); return; }
+            editingState[key] = true;
+            const display = document.getElementById(`display-${key}`);
+            const editor = document.getElementById(`editor-${key}`);
+            editor.value = JSON.stringify(data, null, 2);
+            display.style.display = 'none';
+            editor.style.display = 'block';
+            document.getElementById(`editBtn-${key}`).style.display = 'none';
+            document.getElementById(`saveBtn-${key}`).style.display = '';
+            document.getElementById(`cancelBtn-${key}`).style.display = '';
+            const acc = document.getElementById(`accordion-${key}`);
+            if (!acc.classList.contains('open')) acc.classList.add('open');
+        }
+
+        function cancelAccordionEdit(key) {
+            editingState[key] = false;
+            const display = document.getElementById(`display-${key}`);
+            const editor = document.getElementById(`editor-${key}`);
+            editor.style.display = 'none';
+            display.style.display = '';
+            document.getElementById(`editBtn-${key}`).style.display = '';
+            document.getElementById(`saveBtn-${key}`).style.display = 'none';
+            document.getElementById(`cancelBtn-${key}`).style.display = 'none';
+        }
+
+        async function saveAccordionEdit(key) {
+            const editor = document.getElementById(`editor-${key}`);
+            let parsed;
+            try { parsed = JSON.parse(editor.value); }
+            catch (e) { showToast(`JSON格式错误: ${e.message}`, 'error'); return; }
+            const fileName = tabFileNames[key];
+            try {
+                const resp = await fetch('/api/save-json', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionId: sessionId, filename: fileName, data: parsed })
+                });
+                const result = await resp.json();
+                if (!result.ok) { showToast(`保存失败: ${result.error}`, 'error'); return; }
+            } catch (e) {
+                showToast(`保存失败: ${e.message}`, 'error');
+                return;
+            }
+            generatedJSONs[key] = parsed;
+            cancelAccordionEdit(key);
+            refreshAllAccordions();
+            showToast(`${fileName} 已保存`, 'success');
+        }
+
+        function downloadJSON(data, filename) {
+            if (!data) { showToast(`无数据: ${filename}`, 'error'); return; }
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            link.click();
+            URL.revokeObjectURL(link.href);
+        }
+
+        function downloadAllJSON() {
+            downloadJSON(generatedJSONs.pallet, '托盘清单.json');
+            setTimeout(() => downloadJSON(generatedJSONs.english, '英文单套预装明细.json'), 200);
+            setTimeout(() => downloadJSON(generatedJSONs.chinese, '中文包装清单参考.json'), 400);
+            showToast('已下载全部JSON文件', 'success');
+        }
+
+        let generatedFilenames = { en: null, ja: null };
+
+        async function runPythonScript(lang) {
+            if (!generatedJSONs.pallet && !generatedJSONs.english && !generatedJSONs.chinese) {
+                showToast('请先生成JSON文件', 'error'); return;
+            }
+            const langLabel = lang === 'ja' ? '日文' : '英文';
+            addChatMsg('system', `正在运行 ${langLabel} Python脚本...`, 'info');
+            try {
+                const resp = await fetch('/api/run-script', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionId: sessionId, lang: lang })
+                });
+                const result = await resp.json();
+                if (result.ok) {
+                    const filename = result.filename || `物流汇总表v10_${lang}.xlsx`;
+                    generatedFilenames[lang] = filename;
+                    const btn = document.getElementById(lang === 'en' ? 'downloadEnBtn' : 'downloadJaBtn');
+                    btn.textContent = `下载 ${filename}`;
+                    btn.style.display = '';
+                    addChatMsg('system', `${langLabel} Excel生成成功: ${filename}`, 'ok');
+                    showToast(`${langLabel} Excel生成成功!`, 'success');
+                } else {
+                    addChatMsg('system', `${langLabel} Excel生成失败: ${result.error || result.stderr}`, 'err');
+                    showToast(`Excel生成失败`, 'error');
+                }
+            } catch (error) {
+                addChatMsg('system', `请求失败: ${error.message}`, 'err');
+                showToast('请求失败: ' + error.message, 'error');
+            }
+        }
+
+        function downloadExcel(lang) {
+            const filename = generatedFilenames[lang];
+            if (!filename || !sessionId) { showToast('请先生成Excel', 'error'); return; }
+            window.open(`/api/download/${sessionId}/${filename}`);
+        }
+
+        function updateTokenDisplay() {
+            document.getElementById('tokenIn').textContent = tokenStats.input.toLocaleString();
+            document.getElementById('tokenOut').textContent = tokenStats.output.toLocaleString();
+            document.getElementById('tokenTotal').textContent = (tokenStats.input + tokenStats.output).toLocaleString();
+            document.getElementById('tokenCalls').textContent = tokenStats.calls;
+            const model = document.getElementById('modelSelect').value;
+            let costPerMIn = 0.01, costPerMOut = 0.01;
+            if (model === 'glm-5.1') { costPerMIn = 0.01; costPerMOut = 0.01; }
+            else if (model === 'glm-4v-plus') { costPerMIn = 0.01; costPerMOut = 0.01; }
+            else if (model === 'glm-4v-flash') { costPerMIn = 0.0001; costPerMOut = 0.0001; }
+            else if (model === 'kimi-k2.6') { costPerMIn = 0.024; costPerMOut = 0.024; }
+            else { costPerMIn = 0.005; costPerMOut = 0.005; }
+            const cost = (tokenStats.input * costPerMIn + tokenStats.output * costPerMOut) / 1000;
+            document.getElementById('tokenCost').textContent = `¥${cost.toFixed(4)}`;
+        }
+
+        function addTokens(inT, outT) {
+            tokenStats.input += inT;
+            tokenStats.output += outT;
+            tokenStats.calls += 1;
+            updateTokenDisplay();
+        }
+
+        function mergeJsonArray(existing, incoming, ...keyFields) {
+            if (!existing || !existing.length) return incoming || [];
+            if (!incoming || !incoming.length) return existing;
+            const keySet = new Set();
+            existing.forEach(item => {
+                for (const kf of keyFields) {
+                    if (item[kf] !== undefined) keySet.add(String(item[kf]));
+                }
+            });
+            const result = [...existing];
+            incoming.forEach(item => {
+                let exists = false;
+                for (const kf of keyFields) {
+                    if (item[kf] !== undefined && keySet.has(String(item[kf]))) { exists = true; break; }
+                }
+                if (!exists) result.push(item);
+            });
+            return result;
+        }
+
+        function applyJsonUpdate(evt) {
+            if (evt.pallet) generatedJSONs.pallet = mergeJsonArray(generatedJSONs.pallet, evt.pallet, '托盘序号', '托盘编码');
+            if (evt.english) generatedJSONs.english = mergeJsonArray(generatedJSONs.english, evt.english, '套装编码');
+            if (evt.chinese) generatedJSONs.chinese = mergeJsonArray(generatedJSONs.chinese, evt.chinese, '包装清单名称');
+            refreshAllAccordions();
+        }
+
+        function buildJsonContext() {
+            const parts = [];
+            if (generatedJSONs.pallet && generatedJSONs.pallet.length)
+                parts.push(`当前托盘清单数据：\n${JSON.stringify(generatedJSONs.pallet, null, 2)}`);
+            if (generatedJSONs.english && generatedJSONs.english.length)
+                parts.push(`当前英文单套预装明细数据：\n${JSON.stringify(generatedJSONs.english, null, 2)}`);
+            if (generatedJSONs.chinese && generatedJSONs.chinese.length)
+                parts.push(`当前中文包装清单参考数据：\n${JSON.stringify(generatedJSONs.chinese, null, 2)}`);
+            return parts.join('\n\n');
+        }
+
+        function handleSend() {
+            if (isRunning) {
+                showToast('AI 自动询价正在运行中', 'warning');
+                return;
+            }
+            sendChat();
+        }
+
+        async function sendChat() {
+            const input = document.getElementById('chatInput');
+            const msg = input.value.trim();
+            if (!sessionId) { showToast('请先生成一次分析', 'error'); return; }
+            if (!msg) { showToast('请输入消息内容', 'warning'); return; }
+
+            const context = buildJsonContext();
+            const fullMsg = context ? `${context}\n\n用户要求：${msg}` : msg;
+
+            addChatMsg('user', msg);
+            input.value = '';
+            hideContinueBtn();
+
+            document.getElementById('chatSendBtn').style.display = 'none';
+            document.getElementById('chatStopBtn').style.display = '';
+
+            addChatMsg('assistant', '');
+
+            chatAbortController = new AbortController();
+            chatStreamActive = true;
+
+            try {
+                const resp = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionId: sessionId, message: fullMsg }),
+                    signal: chatAbortController.signal
+                });
+
+                const reader = resp.body.getReader();
+                chatStreamReader = reader;
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let fullReply = '';
+
+                while (chatStreamActive) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        let evt;
+                        try { evt = JSON.parse(line.slice(6)); } catch(e) { continue; }
+
+                        if (evt.type === 'token') {
+                            fullReply += evt.text;
+                            updateLastMsg(fullReply);
+                        } else if (evt.type === 'done') {
+                            chatMessages[chatMessages.length - 1].content = evt.reply || fullReply;
+                            if (evt.updated) {
+                                applyJsonUpdate(evt);
+                            }
+                        } else if (evt.type === 'error') {
+                            chatMessages[chatMessages.length - 1].content = `[错误] ${evt.msg}`;
+                        }
+                    }
+                }
+
+                if (!chatStreamActive && fullReply) {
+                    reader.cancel();
+                }
+
+                if (!chatMessages[chatMessages.length - 1].content && fullReply) {
+                    chatMessages[chatMessages.length - 1].content = fullReply;
+                }
+
+            } catch (e) {
+                if (e.name === 'AbortError') {
+                    if (!chatMessages[chatMessages.length - 1].content) {
+                        chatMessages[chatMessages.length - 1].content = '[已停止]';
+                    }
+                } else {
+                    chatMessages[chatMessages.length - 1].content = `[网络错误] ${e.message}`;
+                }
+            }
+
+            chatAbortController = null;
+            renderChatMessages();
+            document.getElementById('chatStopBtn').style.display = 'none';
+            document.getElementById('chatSendBtn').style.display = '';
+            document.getElementById('chatSendBtn').disabled = false;
+            showContinueBtn();
+            input.focus();
+        }
+
+        function toggleSupplementPanel() {
+            const panel = document.getElementById('supplementPanel');
+            panel.classList.toggle('visible');
+            if (panel.classList.contains('visible')) {
+                document.getElementById('supplementPages').focus();
+            }
+        }
+
+        async function doSupplement() {
+            if (!sessionId) { showToast('请先生成一次分析', 'error'); return; }
+            const pagesInput = document.getElementById('supplementPages').value.trim();
+            if (!pagesInput) { showToast('请输入页码', 'error'); return; }
+
+            const chatInputEl = document.getElementById('chatInput');
+            const userMsg = chatInputEl.value.trim();
+            chatInputEl.value = '';
+
+            const panel = document.getElementById('supplementPanel');
+            panel.classList.remove('visible');
+
+            addChatMsg('system', `正在提取PDF第 ${pagesInput} 页的文本...`, 'info');
+
+            try {
+                const resp = await fetch('/api/extract-pages', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionId: sessionId, pages: pagesInput })
+                });
+                const result = await resp.json();
+                if (!result.ok) {
+                    addChatMsg('system', `提取失败: ${result.error}`, 'err');
+                    showToast(result.error, 'error');
+                    return;
+                }
+
+                const pages = result.pages.join(', ');
+                addChatMsg('system', `已提取第 ${pages} 页文本 (${result.text.length} 字)`, 'ok');
+
+                const existingSummary = generatedJSONs.pallet && generatedJSONs.pallet.length
+                    ? `\n已有托盘序号: ${generatedJSONs.pallet.map(p => p['托盘序号'] || p['托盘编码'] || '?').join(', ')} (共${generatedJSONs.pallet.length}个，请勿重复输出这些托盘)`
+                    : '';
+
+                let prompt = `以下是PDF中之前缺失的第 ${pages} 页的文本内容。${existingSummary}\n\n请只从下面的文本中提取新出现的托盘数据（仅输出已有列表中不存在的托盘），不要输出已有的托盘。用 ===托盘清单=== 标记包裹。\n\n--- 第${pages}页文本 ---\n${result.text}`;
+                if (userMsg) {
+                    prompt = `${userMsg}\n\n--- 附带PDF第${pages}页文本 ---\n${result.text}${existingSummary}\n\n请根据用户要求结合上面文本处理。`;
+                }
+
+                const displayMsg = userMsg
+                    ? `${userMsg}\n(附带PDF第 ${pages} 页文本)`
+                    : `(补充PDF第 ${pages} 页文本)`;
+                addChatMsg('user', displayMsg);
+                addChatMsg('assistant', '');
+
+                document.getElementById('chatSendBtn').style.display = 'none';
+                document.getElementById('chatStopBtn').style.display = '';
+                chatAbortController = new AbortController();
+                chatStreamActive = true;
+
+                try {
+                    const chatResp = await fetch('/api/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ sessionId: sessionId, message: prompt }),
+                        signal: chatAbortController.signal
+                    });
+                    const reader = chatResp.body.getReader();
+                    chatStreamReader = reader;
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+                    let fullReply = '';
+                    while (chatStreamActive) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop();
+                        for (const line of lines) {
+                            if (!line.startsWith('data: ')) continue;
+                            let evt;
+                            try { evt = JSON.parse(line.slice(6)); } catch(e) { continue; }
+                            if (evt.type === 'token') {
+                                fullReply += evt.text;
+                                updateLastMsg(fullReply);
+                            } else if (evt.type === 'done') {
+                                chatMessages[chatMessages.length - 1].content = evt.reply || fullReply;
+                                if (evt.updated) {
+                                    applyJsonUpdate(evt);
+                                }
+                                if (evt.tokens) addTokens(evt.tokens.input, evt.tokens.output);
+                            } else if (evt.type === 'error') {
+                                chatMessages[chatMessages.length - 1].content = `[错误] ${evt.msg}`;
+                            }
+                        }
+                    }
+                    if (!chatStreamActive && fullReply) {
+                        reader.cancel();
+                    }
+                    if (!chatMessages[chatMessages.length - 1].content && fullReply) {
+                        chatMessages[chatMessages.length - 1].content = fullReply;
+                    }
+                } catch (e) {
+                    if (e.name === 'AbortError') {
+                        if (!chatMessages[chatMessages.length - 1].content) {
+                            chatMessages[chatMessages.length - 1].content = '[已停止]';
+                        }
+                    } else {
+                        chatMessages[chatMessages.length - 1].content = `[网络错误] ${e.message}`;
+                    }
+                }
+
+            chatAbortController = null;
+            chatStreamReader = null;
+            renderChatMessages();
+                document.getElementById('chatStopBtn').style.display = 'none';
+                document.getElementById('chatSendBtn').style.display = '';
+                document.getElementById('chatSendBtn').disabled = false;
+                showContinueBtn();
+            } catch (e) {
+                addChatMsg('system', `提取失败: ${e.message}`, 'err');
+                showToast('提取失败: ' + e.message, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

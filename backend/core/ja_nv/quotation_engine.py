@@ -145,11 +145,15 @@ def _format_pile_spec_display(spec):
 
     length_mm = extract_length_from_spec(spec)
     if length_mm:
-        return f"L {_strip_decimal_zero(length_mm)}"
+        return _strip_decimal_zero(length_mm)
 
     match = re.search(r'L\s*[:=]?\s*(\d+(?:\.\d+)?)', raw_spec, re.IGNORECASE)
     if match:
-        return f"L {match.group(1)}"
+        return match.group(1)
+
+    match_num = re.search(r'(\d+(?:\.\d+)?)', raw_spec)
+    if match_num:
+        return match_num.group(1)
 
     return raw_spec[:8]
 
@@ -181,7 +185,7 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
                            code_to_images=None, image_temp_dir=None,
                            image_cache=None, angle_override=None,
                            need_weight_code=False, need_weight=False, need_code=False, missing_boards=0,
-                           is_inverter=False):
+                           is_inverter=False, span_ew_override=None):
     from backend.core.shared.image_utils import (
         prepare_image_for_excel, add_image_centered_in_cell,
     )
@@ -307,7 +311,7 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
     if str(angle).lower() == 'nan' or str(angle).lower().strip('°') == 'nan':
         angle = ''
     ground_height = nv_params.get('ground_height') or matrix_data.get('ground_height') or ''
-    span_ew = nv_params.get('span_ew') or 2700
+    span_ew = span_ew_override if span_ew_override is not None else (nv_params.get('span_ew') or 2700)
     sales_name = nv_params.get('sales_name') or 'Nanami'
     sales_phone = nv_params.get('sales_phone') or '+86-137-7466-5835'
     sales_fax = nv_params.get('sales_fax') or '0086-592-5738212'
@@ -775,9 +779,13 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
             ws.row_dimensions[row].height = 40
             code = str(p.get('code', '') or '')
             price_info = _resolve_pile_price(price_mapping, code, spec=p.get('spec', ''))
-            display_name = 'スクリュー杭'
+            display_name = (
+                price_info.get('name_ja')
+                or price_info.get('name')
+                or 'スクリュー杭'
+            ) if price_info else 'スクリュー杭'
             if not pile_display_name:
-                pile_display_name = 'スクリュー杭'
+                pile_display_name = display_name
             raw_material = (price_info.get('db_material') if price_info and price_info.get('db_material') else None) or p.get('material', '')
             display_material = ''
             if raw_material:
@@ -836,12 +844,11 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
             _set(ws, row, 5, '')
             try:
                 _spec_num = float(spec)
-                ws.cell(row=row, column=6, value=_spec_num).font = SM_FONT
-                ws.cell(row=row, column=6).alignment = CENTER
-                ws.cell(row=row, column=6).number_format = '"L"!=#"mm"'
+                _spec_display = f'L={int(_spec_num)}mm' if _spec_num == int(_spec_num) else f'L={_spec_num}mm'
             except (ValueError, TypeError):
-                ws.cell(row=row, column=6, value=spec).font = SM_FONT
-                ws.cell(row=row, column=6).alignment = CENTER
+                _spec_display = str(spec)
+            ws.cell(row=row, column=6, value=_spec_display).font = SM_FONT
+            ws.cell(row=row, column=6).alignment = CENTER
 
             ws.cell(row=row, column=7, value=display_unit_price).font = SM_FONT
             ws.cell(row=row, column=7).alignment = CENTER
@@ -2708,10 +2715,11 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
         ws.cell(row=r_tax, column=2).border = THIN_BORDER
         ws.cell(row=r_tax, column=2).alignment = center
         ws.merge_cells(f'B{r_tax}:K{r_tax}')
-        if r_cif_val is not None:
-            tax_formula = f'=L{r_cif_val}*{(consumption_tax_pct + tariff_rate_pct) / 100}'
-        else:
-            tax_formula = f'=({cif_formula})*{(consumption_tax_pct + tariff_rate_pct) / 100}'
+        _bp_base = f'L{r_disc}+L{r_bp_total}'
+        _fence_part = f'+L{r_fence_disc}' if all_fence_items else ''
+        _ct_rate = round(consumption_tax_pct / 100, 4)
+        _tr_rate = round(tariff_rate_pct / 100, 4)
+        tax_formula = f'=({_bp_base})*{_ct_rate}+({_bp_base}{_fence_part})*{_tr_rate}'
         ws.cell(row=r_tax, column=12, value=tax_formula).font = SM_FONT_BOLD
         ws.cell(row=r_tax, column=12).alignment = center
         ws.cell(row=r_tax, column=12).border = THIN_BORDER
@@ -2823,15 +2831,15 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
     elif _show_ddp:
         ws.cell(row=total_amount_cell_r, column=3, value=f'=L{r_adjust}').font = _FONT_12_BOLD
         ws.cell(row=total_amount_cell_r, column=3).alignment = _bottom_center
-        ws.cell(row=total_amount_cell_r, column=3).number_format = '"US$" #,##0.00'
+        ws.cell(row=total_amount_cell_r, column=3).number_format = '"US$" #,##0'
     else:
         ws.cell(row=total_amount_cell_r, column=3, value=f'=L{r_cif_val}').font = _FONT_12_BOLD
         ws.cell(row=total_amount_cell_r, column=3).alignment = _bottom_center
-        ws.cell(row=total_amount_cell_r, column=3).number_format = '"US$" #,##0.00'
+        ws.cell(row=total_amount_cell_r, column=3).number_format = '"US$" #,##0'
     ws.cell(row=kw_price_cell_r, column=3, value=f'=C{total_amount_cell_r}/I{r_btotal}').font = _FONT_12_BOLD
     ws.cell(row=kw_price_cell_r, column=3).alignment = _bottom_center
     if need_jpy_quote and r_jpy is not None:
-        ws.cell(row=kw_price_cell_r, column=3).number_format = '"JPY" #,##0.000'
+        ws.cell(row=kw_price_cell_r, column=3).number_format = '"JPY" #,##0'
     else:
         ws.cell(row=kw_price_cell_r, column=3).number_format = '"US$" #,##0.000'
 
@@ -3103,7 +3111,7 @@ def create_spare_parts_sheet(workbook, spare_products, price_mapping,
             if coating_thickness in (15, 18):
                 display_material += f'  {coating_thickness}um'
 
-        spec = _format_pile_spec_display(product.get('spec', ''))
+        spec = product.get('spec', '')
         quantity = int(float(product.get('quantity', 0) or 0))
 
         ws.merge_cells(f'A{row}:B{row}')
@@ -3115,13 +3123,7 @@ def create_spare_parts_sheet(workbook, spare_products, price_mapping,
         ws.cell(row=row, column=4).alignment = CENTER
         _set(ws, row, 5, '')
 
-        try:
-            _spec_num = float(spec)
-            ws.cell(row=row, column=6, value=_spec_num).font = SM_FONT
-            ws.cell(row=row, column=6).alignment = CENTER
-        except (ValueError, TypeError):
-            ws.cell(row=row, column=6, value=spec).font = SM_FONT
-            ws.cell(row=row, column=6).alignment = CENTER
+        _set(ws, row, 6, spec)
 
         display_unit_price = 0.0
         if price_info and has_valid_price_info(price_info):

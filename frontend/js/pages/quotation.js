@@ -66,7 +66,7 @@
         <input type="radio" name="ja-case-type" value="EST" style="width: 16px; height: 16px;">
         <span>定制模板</span>
       </label>
-      <label style="display: none;">
+      <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
         <input type="radio" name="ja-case-type" value="NORMAL" style="width: 16px; height: 16px;">
         <span>简易模板</span>
       </label>
@@ -360,6 +360,8 @@
               <option value="大阪">大阪</option>
               <option value="門司">門司</option>
               <option value="博多">博多</option>
+              <option value="仙台">仙台</option>
+              <option value="苫小牧">苫小牧</option>
               <option value="__custom__">自定义</option>
             </select>
             <input type="text" id="nv-dest-port-custom" placeholder="直接入力" style="display:none; width: 100px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
@@ -543,6 +545,17 @@
         </div>
       </div>
       <div data-group-only="英语组" id="en-params-panel" style="margin-top: 10px; padding: 12px; background: #f0fdfa; border-radius: 10px; border: 1px solid #b2dfdb;">
+        <div style="font-size: 13px; color: var(--text); margin-bottom: 6px; font-weight: 600;">Seller</div>
+        <div id="en-seller-btns" style="display: flex; align-items: flex-start; gap: 10px; font-size: 13px; color: var(--text); flex-wrap: wrap; margin-bottom: 10px;">
+          <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+            <input type="radio" name="en-seller" value="metal" checked style="width: 16px; height: 16px;">
+            <span>Xiamen Kseng Metal Tech. Co., Ltd.</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+            <input type="radio" name="en-seller" value="new_energy" style="width: 16px; height: 16px;">
+            <span>Xiamen Kseng New Energy Tech Co., Ltd.</span>
+          </label>
+        </div>
         <div style="font-size: 13px; color: var(--text); margin-bottom: 6px; font-weight: 600;">销售类型</div>
         <div id="en-sale-type-section" style="display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text); flex-wrap: wrap; margin-bottom: 10px;">
           <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
@@ -3140,6 +3153,9 @@
 
                 var enPaymentTermEl = document.querySelector('input[name="en-payment-term"]:checked');
                 requestBody.payment_term = enPaymentTermEl ? enPaymentTermEl.value : '3070shipment';
+
+                var enSellerEl = document.querySelector('input[name="en-seller"]:checked');
+                requestBody.seller_name = enSellerEl ? enSellerEl.value : 'metal';
 
                 var enNeedTotalMaterialsEl = document.getElementById('en-need-total-materials');
                 if (enNeedTotalMaterialsEl && enNeedTotalMaterialsEl.checked) {

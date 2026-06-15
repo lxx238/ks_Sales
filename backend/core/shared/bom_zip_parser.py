@@ -18,7 +18,7 @@ def _build_ss_lookup(ss_data):
         si_end = ss_data.find(b'</si>', si_start)
         if si_end == -1:
             break
-        text = ' '.join(
+        text = ''.join(
             tm.group(1).decode('utf-8', errors='replace')
             for tm in re.finditer(rb'<t[^>]*>([^<]*)</t>', ss_data[si_start:si_end])
         )

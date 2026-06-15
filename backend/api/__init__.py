@@ -9,6 +9,7 @@ from .fence_gate_style import fence_style_bp, gate_style_bp
 from .health import health_bp
 from .image_inquiry import image_inquiry_bp
 from .inquiry import inquiry_bp
+from .logistics import logistics_bp
 from .public_dashboard import public_dashboard_bp
 from .unified_contacts import unified_contacts_bp
 from .question import question_bp
@@ -40,3 +41,4 @@ def register_blueprints(app):
     app.register_blueprint(usage_bp)
     app.register_blueprint(public_dashboard_bp)
     app.register_blueprint(pile_price_bp)
+    app.register_blueprint(logistics_bp)

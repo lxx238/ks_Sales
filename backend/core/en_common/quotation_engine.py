@@ -20,6 +20,26 @@ def _safe_float(val, default=0.0):
     except (ValueError, TypeError):
         return default
 
+
+def _format_spec_display(spec_str):
+    s = str(spec_str).strip()
+    try:
+        return int(float(s))
+    except (ValueError, TypeError):
+        return s
+
+
+def _spec_needs_number_format(spec_str):
+    s = str(spec_str).strip()
+    try:
+        float(s)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+_SPEC_NUMBER_FMT = '"L="#,##0" mm"'
+
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill, Color
 from openpyxl.utils import get_column_letter
 from openpyxl.drawing.image import Image as XLImage
@@ -31,6 +51,7 @@ from backend.core.shared.price_utils import (
     has_valid_price_info,
     round_to_2_decimal,
     _get_discount_category,
+    normalize_lookup_code,
 )
 from backend.core.shared.weight_utils import (
     extract_length_from_spec,
@@ -44,10 +65,8 @@ from backend.core.shared.text_utils import (
 )
 from backend.core.shared.product_utils import (
     _is_valid_product_code,
-    _match_exclude_group,
 )
 from backend.core.shared.constants import (
-    EXCLUDE_ITEM_GROUPS,
     CARBON_STEEL_PRICING_ATTRS,
     IMAGE_WIDTH,
     IMAGE_HEIGHT,
@@ -71,9 +90,18 @@ _LANG_NAME_KEY_MAP = {
 }
 
 
-def _resolve_product_name(price_info, product, lang='en'):
+def _resolve_product_name(price_info, product, lang='en', price_mapping=None):
     fallback = product.get('name', '')
     if not price_info:
+        if price_mapping:
+            _code = product.get('code', '')
+            for _lookup in (_code, normalize_lookup_code(_code)):
+                rec = price_mapping.get(_lookup) if _lookup else None
+                if rec:
+                    for key in _LANG_NAME_KEY_MAP.get(lang, ('name_en',)):
+                        val = rec.get(key)
+                        if val:
+                            return val
         return fallback
     for key in _LANG_NAME_KEY_MAP.get(lang, ('name_en',)):
         val = price_info.get(key)
@@ -109,15 +137,8 @@ def _is_carbon_steel_cached(product, price_info):
     return False
 
 
-def _classify_products_single_pass(all_products, price_mapping, delete_options, always_exclude, ko_exclude_options=None):
-    delete_options = delete_options or {}
-    ko_exclude_options = ko_exclude_options or {}
-    all_exclude_opts = {k: True for k in EXCLUDE_ITEM_GROUPS} if always_exclude else {}
-    for k in list(ko_exclude_options.keys()) + list(delete_options.keys()):
-        all_exclude_opts[k] = True
-    aluminum = []
-    carbon_steel = []
-    excluded = []
+def _classify_products_single_pass(all_products, price_mapping):
+    combined_products = []
     pile_products = []
     price_info_cache = {}
     for p in all_products:
@@ -138,23 +159,8 @@ def _classify_products_single_pass(all_products, price_mapping, delete_options, 
         qty = p.get('quantity', 0)
         if not qty or qty <= 0:
             continue
-        matched_group = _match_exclude_group(p, price_mapping, all_exclude_opts)
-        is_cs = _is_carbon_steel_cached(p, pi)
-        if matched_group:
-            if delete_options.get(matched_group):
-                continue
-            if ko_exclude_options.get(matched_group):
-                excluded.append(p)
-            else:
-                if is_cs:
-                    carbon_steel.append(p)
-                else:
-                    aluminum.append(p)
-        elif is_cs:
-            carbon_steel.append(p)
-        else:
-            aluminum.append(p)
-    return aluminum, carbon_steel, excluded, pile_products, price_info_cache
+        combined_products.append(p)
+    return combined_products, pile_products, price_info_cache
 
 
 def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
@@ -166,8 +172,7 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
                         sale_type='export',
                         ko_discount_rate=100, ko_steel_discount_rate=84,
                         ko_purchased_discount_rate=94, coating_thickness=10,
-                        delete_options=None, always_exclude_extra_items=False,
-                        ko_exclude_options=None, need_weight_code=False,
+                        need_weight_code=False,
                         lang='en',
                         discount_method='project',
                         **kwargs):
@@ -180,9 +185,8 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
     else:
         currency_label = 'USD'
 
-    aluminum, carbon_steel, excluded, pile_products, price_info_cache = _classify_products_single_pass(
-        all_products, price_mapping, delete_options or {},
-        always_exclude_extra_items, ko_exclude_options or {}
+    combined_products, pile_products, price_info_cache = _classify_products_single_pass(
+        all_products, price_mapping
     )
 
     matrix_data = matrix_data or {}
@@ -257,8 +261,7 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
         cell.fill = BLUE_FILL
     ws.row_dimensions[header_row].height = 45
 
-    combined_products = aluminum + carbon_steel
-    all_render_products = combined_products + excluded
+    all_render_products = combined_products
     data_start_row = 3
     matched_count = 0
     unmatched_count = 0
@@ -285,7 +288,7 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
             if price_info is None:
                 price_info = resolve_price_info(price_mapping, product_code, spec=product.get('spec', ''))
                 product['_price_info'] = price_info
-            en_name = _resolve_product_name(price_info, product, lang)
+            en_name = _resolve_product_name(price_info, product, lang, price_mapping)
 
             row_product_map[row] = product
 
@@ -297,9 +300,11 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
             _sc(ws, row, 4, adjust_material_by_coating(translate_material(_raw_mat, 'en'), coating_thickness),
                 font=normal_font, align=center_align, border=thin_border)
 
-            ws.cell(row=row, column=5).number_format = '@'
-            _sc(ws, row, 5, _strip_cjk_spec(str(product['spec']).strip()),
-                font=normal_font, align=center_align, border=thin_border)
+            _spec_raw = _strip_cjk_spec(str(product['spec']).strip())
+            _spec_val = _format_spec_display(_spec_raw)
+            _spec_fmt = _SPEC_NUMBER_FMT if _spec_needs_number_format(_spec_raw) else '@'
+            _sc(ws, row, 5, _spec_val,
+                font=normal_font, align=center_align, border=thin_border, number_format=_spec_fmt)
 
             quantity = _safe_float(product['quantity'])
             if quantity > 0:
@@ -431,118 +436,6 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
 
     part1_data_end = current_row - 1
 
-    if excluded:
-        current_row += 1
-        ws.merge_cells(f'A{current_row}:{max_col_letter}{current_row}')
-        _sc(ws, current_row, 1, _t('common_excluded_title', lang),
-            font=Font(name='Arial', size=11, bold=True, color='FF0000'), align=left_align, fill=BLUE_FILL)
-        current_row += 1
-        for ci, h in enumerate(headers):
-            cell = ws.cell(row=current_row, column=ci + 1, value=h)
-            cell.font = bold_font
-            cell.alignment = center_align
-            cell.border = thin_border
-            cell.fill = BLUE_FILL
-        ws.row_dimensions[current_row].height = 36
-        current_row += 1
-
-        for product in excluded:
-            row = current_row
-            ws.row_dimensions[row].height = 40
-            product_code = product['code']
-            price_info = product.get('_price_info')
-            if price_info is None:
-                price_info = resolve_price_info(price_mapping, product_code, spec=product.get('spec', ''))
-                product['_price_info'] = price_info
-            en_name = _resolve_product_name(price_info, product, lang)
-
-            _sc(ws, row, 1, '', font=normal_font, align=center_align, border=thin_border)
-            _sc(ws, row, 2, en_name, font=normal_font, align=center_align, border=thin_border)
-            _raw_mat = (price_info.get('db_material') if price_info and price_info.get('db_material') else None) or product.get('material', '')
-            _sc(ws, row, 4, adjust_material_by_coating(translate_material(_raw_mat, 'en'), coating_thickness),
-                font=normal_font, align=center_align, border=thin_border)
-            ws.cell(row=row, column=5).number_format = '@'
-            _sc(ws, row, 5, _strip_cjk_spec(str(product['spec']).strip()), font=normal_font, align=center_align, border=thin_border)
-
-            quantity = _safe_float(product['quantity'])
-            total_qty = quantity * table_qty
-            _sc(ws, row, 6, _safe_int(quantity) if quantity % 1 == 0 else quantity,
-                font=normal_font, align=center_align, border=thin_border)
-            _sc(ws, row, 7, _safe_int(total_qty) if total_qty % 1 == 0 else total_qty,
-                font=normal_font, align=center_align, border=thin_border)
-
-            unit_price = 0
-            display_unit_price = 0
-            price_unit = ''
-            ex_is_matched = False
-            if price_info and has_valid_price_info(price_info):
-                unit_price = float(price_info['price'])
-                price_unit = price_info.get('unit', '')
-                ex_is_matched = True
-            is_meter = price_unit in ['米', 'm', 'M', 'meter', 'Meter', 'METERS', 'meters']
-            length_mm = Decimal(str(extract_length_from_spec(product['spec']) or 0))
-            if is_meter and length_mm > 0:
-                display_unit_price = float(Decimal(str(unit_price)) * length_mm / Decimal('1000'))
-            else:
-                display_unit_price = unit_price
-
-            _ex_original_price = display_unit_price
-            if discount_method == 'unit_price' and display_unit_price > 0 and ex_is_matched:
-                _ex_cat = _get_discount_category(price_info)
-                if _ex_cat == 'steel':
-                    _ex_rate = ko_steel_discount_rate
-                elif _ex_cat == 'purchased':
-                    _ex_rate = ko_purchased_discount_rate
-                else:
-                    _ex_rate = ko_discount_rate
-                display_unit_price = display_unit_price * _ex_rate / 100
-
-            if display_unit_price > 0:
-                if discount_method == 'unit_price' and _ex_original_price > 0 and ex_is_matched:
-                    _sc(ws, row, 8, f'={round(_ex_original_price, 6)}*{_ex_rate}/100', font=normal_font, align=center_align, border=thin_border, number_format=CURRENCY_FMT)
-                else:
-                    _sc(ws, row, 8, float(display_unit_price), font=normal_font, align=center_align, border=thin_border, number_format=CURRENCY_FMT)
-            else:
-                _sc(ws, row, 8, "", font=normal_font, align=center_align, border=thin_border)
-            _sc(ws, row, 9, f"=H{row}*G{row}", font=normal_font, align=center_align, border=thin_border, number_format=CURRENCY_FMT)
-
-            if need_weight_code:
-                weight_cell = ws.cell(row=row, column=10)
-                unit_weight = None
-                if price_info:
-                    db_w = parse_decimal_number(price_info.get('db_weight'))
-                    if db_w is not None and db_w > 0:
-                        code_attribute = str(price_info.get('code_attribute') or '').strip().upper()
-                        unit_weight = db_w
-                        if code_attribute in WEIGHT_BY_LENGTH_ATTRIBUTES:
-                            length_mm_w = extract_length_from_spec(product.get('spec'))
-                            if length_mm_w and length_mm_w > 0:
-                                unit_weight = db_w * Decimal(str(length_mm_w)) / Decimal('1000')
-                            else:
-                                unit_weight = None
-                if unit_weight is None:
-                    bom_w = product.get('weight', 0)
-                    if bom_w and bom_w > 0:
-                        unit_weight = Decimal(str(bom_w))
-                if unit_weight is not None and unit_weight > 0:
-                    weight_cell.value = float(round_to_2_decimal(unit_weight))
-                    weight_cell.alignment = center_align
-                    weight_cell.font = normal_font
-                    weight_cell.border = thin_border
-                    weight_cell.number_format = '#,##0.00'
-                else:
-                    weight_cell.value = ""
-                    weight_cell.alignment = center_align
-                    weight_cell.font = normal_font
-                    weight_cell.border = thin_border
-                _sc(ws, row, 11, product_code, font=normal_font, align=center_align, border=thin_border)
-
-            if not ex_is_matched:
-                for c in range(1, max_col + 1):
-                    ws.cell(row=row, column=c).fill = yellow_fill
-
-            current_row += 1
-
     total_row = current_row
     ws.merge_cells(f'A{total_row}:G{total_row}')
     _sc(ws, total_row, 1, _t('common_total_amount_label', lang).format(currency=currency_label), font=total_font, align=right_align, border=thin_border, fill=BLUE_FILL)
@@ -620,7 +513,7 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
         unmatched_products_out.extend(local_unmatched)
 
     quotation_product_codes = set()
-    for p in combined_products + excluded:
+    for p in combined_products:
         c = str(p.get('code', '')).strip()
         if c:
             quotation_product_codes.add(c)
@@ -631,7 +524,7 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
     return {
         'sheet_name': sheet_name,
         'quotation_product_codes': quotation_product_codes,
-        'valid_products': len(combined_products) + len(excluded),
+        'valid_products': len(combined_products),
         'total_weight': 0,
         'total_price': part1_price_all_tables,
         'part1_price_per_table': part1_price_per_table,
@@ -715,7 +608,7 @@ def create_total_materials_sheet(workbook, all_quotation_results, price_mapping=
             price_info = p.get('_price_info')
             if price_info is None and price_mapping:
                 price_info = resolve_price_info(price_mapping, code, spec=spec)
-            en_name = _resolve_product_name(price_info, p, lang)
+            en_name = _resolve_product_name(price_info, p, lang, price_mapping)
             _raw_mat = (price_info.get('db_material') if price_info and price_info.get('db_material') else None) or p.get('material', '')
             material = adjust_material_by_coating(translate_material(_raw_mat, 'en'), coating_thickness)
             unit_price = 0
@@ -878,10 +771,10 @@ def create_total_materials_sheet(workbook, all_quotation_results, price_mapping=
         ws.cell(row=r, column=col_material).alignment = center_align
         ws.cell(row=r, column=col_material).border = thin_border
 
-        ws.cell(row=r, column=col_spec).number_format = '@'
-        ws.cell(row=r, column=col_spec, value=_strip_cjk_spec(str(item['spec']).strip())).font = normal_font
-        ws.cell(row=r, column=col_spec).alignment = center_align
-        ws.cell(row=r, column=col_spec).border = thin_border
+        _spec_raw3 = _strip_cjk_spec(str(item['spec']).strip())
+        _spec_val3 = _format_spec_display(_spec_raw3)
+        _spec_fmt3 = _SPEC_NUMBER_FMT if _spec_needs_number_format(_spec_raw3) else '@'
+        _sc(ws, r, col_spec, _spec_val3, font=normal_font, align=center_align, border=thin_border, number_format=_spec_fmt3)
 
         if need_total_qty:
             pq = _safe_float(item.get('per_table_qty', 0))
@@ -968,7 +861,7 @@ def create_summary_sheet(
         dest_port='BUSAN', container_type='40HQ',
         container_qty=1, ko_cif_freight=0,
         skip_freight=True, quote_validity='7d', lang='en', discount_method='project',
-        payment_term='3070shipment', **kwargs):
+        payment_term='3070shipment', seller_name='', **kwargs):
 
     matrix_data = matrix_data or {}
     _validity_map = {'1d': _t('validity_1d', lang), '7d': _t('validity_1w', lang), 'today': _t('validity_today', lang)}
@@ -991,8 +884,19 @@ def create_summary_sheet(
     module_size = matrix_data.get('module_size') or ''
     angle_val = matrix_data.get('angle') or 0
     max_wind = matrix_data.get('max_wind_speed') or ''
-    max_snow = matrix_data.get('max_snow_load') or ''
+    _raw_snow = matrix_data.get('max_snow_load') or ''
+    if str(_raw_snow).strip() in ('/', '-', '', 'nan'):
+        max_snow = 0
+    else:
+        try:
+            _snow_f = float(_raw_snow)
+            max_snow = 0 if math.isnan(_snow_f) else _raw_snow
+        except (ValueError, TypeError):
+            max_snow = _raw_snow
+    if not max_snow:
+        max_snow = 0
     arrays = matrix_data.get('arrays') or []
+    print(f"[EN-COMMON-DEBUG] create_summary_sheet: ground_clearance={matrix_data.get('ground_clearance', 'KEY_MISSING')}, matrix_data keys={list(matrix_data.keys()) if matrix_data else 'None'}")
 
     ws = workbook.create_sheet(title=_t('common_summary_title', lang))
 
@@ -1036,7 +940,9 @@ def create_summary_sheet(
     ws.merge_cells(f'K{row}:L{row}')
     ws.cell(row=row, column=11, value=_t('common_date', lang)).font = label_font
     ws.cell(row=row, column=11).alignment = right_a
-    ws.cell(row=row, column=13, value=datetime.now().strftime('%Y-%m-%d')).font = normal_font
+    ws.cell(row=row, column=13, value='=TODAY()').font = normal_font
+    ws.cell(row=row, column=13).number_format = 'YYYY/M/D'
+    ws.cell(row=row, column=13).alignment = left
 
     row = 4
     ws.merge_cells(f'K{row}:L{row}')
@@ -1047,13 +953,19 @@ def create_summary_sheet(
     for r in range(2, 5):
         ws.row_dimensions[r].height = 15
 
+    _seller_name_map = {
+        'metal': 'Xiamen Kseng Metal Tech. Co., Ltd',
+        'new_energy': 'Xiamen Kseng New Energy Tech Co., Ltd',
+    }
+    _display_seller = _seller_name_map.get(seller_name, seller_name) if seller_name else 'Xiamen Kseng Metal Tech. Co., Ltd'
+
     row = 5
     ws.cell(row=row, column=1, value=_t('common_seller', lang)).font = company_font
     ws.cell(row=row, column=10, value=_t('common_buyer', lang)).font = company_font
     ws.row_dimensions[row].height = 23
 
     row = 6
-    ws.cell(row=row, column=1, value='Xiamen Kseng Metal Tech. Co., Ltd').font = company_font
+    ws.cell(row=row, column=1, value=_display_seller).font = company_font
     ws.row_dimensions[row].height = 23
 
     contact_defaults = {
@@ -1137,7 +1049,8 @@ def create_summary_sheet(
     ws.merge_cells(f'A{row}:C{row}')
     _sc(ws, row, 1, _t('common_snow_load', lang), font=normal_font, align=center, border=thin_border, fill=BLUE_FILL)
     ws.merge_cells(f'D{row}:G{row}')
-    _sc(ws, row, 4, f'{max_snow} kN/m²' if max_snow else '', font=normal_font, align=center, border=thin_border)
+    _snow_display = f'{max_snow} kN/m²' if max_snow else '0 kN/m²'
+    _sc(ws, row, 4, _snow_display, font=normal_font, align=center, border=thin_border)
     ws.merge_cells(f'H{row}:J{row}')
     _sc(ws, row, 8, _t('common_module_dimension', lang), font=normal_font, align=center, border=thin_border, fill=BLUE_FILL)
     ws.merge_cells(f'K{row}:O{row}')
@@ -1148,7 +1061,8 @@ def create_summary_sheet(
     ws.merge_cells(f'A{row}:C{row}')
     _sc(ws, row, 1, _t('common_wind_load', lang), font=normal_font, align=center, border=thin_border, fill=BLUE_FILL)
     ws.merge_cells(f'D{row}:G{row}')
-    _sc(ws, row, 4, f'{max_wind} m/s' if max_wind else '', font=normal_font, align=center, border=thin_border)
+    _wind_display = str(max_wind) if str(max_wind).lower().endswith('m/s') else f'{max_wind} m/s' if max_wind else ''
+    _sc(ws, row, 4, _wind_display, font=normal_font, align=center, border=thin_border)
     ws.merge_cells(f'H{row}:J{row}')
     _sc(ws, row, 8, _t('common_module_capacity', lang), font=normal_font, align=center, border=thin_border, fill=BLUE_FILL)
     ws.merge_cells(f'K{row}:O{row}')
@@ -1159,7 +1073,9 @@ def create_summary_sheet(
     ws.merge_cells(f'A{row}:C{row}')
     _sc(ws, row, 1, _t('common_ground_clearance', lang), font=normal_font, align=center, border=thin_border, fill=BLUE_FILL)
     ws.merge_cells(f'D{row}:G{row}')
-    _sc(ws, row, 4, '', font=normal_font, align=center, border=thin_border)
+    _gc_val = matrix_data.get('ground_clearance', 0) if matrix_data else 0
+    _gc_display = str(_gc_val) if _gc_val else '0'
+    _sc(ws, row, 4, _gc_display, font=normal_font, align=center, border=thin_border)
     ws.merge_cells(f'H{row}:J{row}')
     _sc(ws, row, 8, _t('common_module_quantity', lang), font=normal_font, align=center, border=thin_border, fill=BLUE_FILL)
     ws.merge_cells(f'K{row}:O{row}')
@@ -1196,7 +1112,7 @@ def create_summary_sheet(
     ws.merge_cells(f'K{row}:O{row}')
     layout_parts = []
     for a in arrays:
-        layout_parts.append(f"{a.get('rows', '')} {_t('layout_row', lang)} × {a.get('cols', '')} {_t('layout_column', lang)} {_t('layout_tables', lang)} {a.get('table_qty', 1)} {_t('layout_tables', lang)}")
+        layout_parts.append(f"{a.get('rows', '')} {_t('layout_row', lang)} × {a.get('cols', '')} {_t('layout_column', lang)} {a.get('table_qty', 1)} × {_t('layout_tables', lang)}")
     layout_cell = _sc(ws, row, 11, '\n'.join(layout_parts) if layout_parts else '', font=normal_font, align=center, border=thin_border)
     layout_cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
     base_layout_height = 25
@@ -1229,7 +1145,7 @@ def create_summary_sheet(
     ws.row_dimensions[row].height = 35
 
     data_row = 26
-    total_base_count = 0
+    total_wp = 0
     for i, qr in enumerate(all_quotation_results):
         r = data_row + i
         cfg = qr.get('config') or {}
@@ -1242,7 +1158,14 @@ def create_summary_sheet(
         detail_sheet = qr.get('sheet_name', '')
         r_kw = md.get('output_kw') or 0
         r_wp = _safe_int(_safe_float(r_kw) * 1000) if r_kw else 0
-        total_base_count += r_set
+        if r_wp == 0:
+            _mw = _safe_int(md.get('module_wattage', 0), 0)
+            _ar = _safe_int(ma.get('rows', md.get('array_rows')), 0)
+            _ac = _safe_int(ma.get('cols', md.get('array_cols')), 0)
+            _at = _safe_int(ma.get('table_qty', r_set), 1)
+            if _mw and _ar and _ac:
+                r_wp = _mw * _ar * _ac * _at
+        total_wp += r_wp
 
         missing = cfg.get('missing_boards', 0)
         if not missing:
@@ -1253,7 +1176,7 @@ def create_summary_sheet(
         ws.cell(row=r, column=1).border = thin_border
 
         ws.merge_cells(f'B{r}:D{r}')
-        desc = f'{r_rows} {_t("layout_row", lang)} × {r_cols} {_t("layout_column", lang)} {_t("layout_tables", lang)} {r_set} {_t("layout_tables", lang)}' if r_rows and r_cols else detail_sheet
+        desc = f'{r_rows} {_t("layout_row", lang)} × {r_cols} {_t("layout_column", lang)} {r_set} × {_t("layout_tables", lang)}' if r_rows and r_cols else detail_sheet
         ws.cell(row=r, column=2, value=desc).font = normal_font
         ws.cell(row=r, column=2).alignment = center
         ws.cell(row=r, column=2).border = thin_border
@@ -1321,8 +1244,8 @@ def create_summary_sheet(
         for ci in range(2, 13):
             ws.cell(row=unit_price_row, column=ci).border = thin_border
         ws.merge_cells(f'M{unit_price_row}:O{unit_price_row}')
-        if total_base_count > 0:
-            _sc(ws, unit_price_row, 13, f'=M{discount_row}/{total_base_count}', font=black_bold_font, align=center, border=thin_border, number_format='#,##0.000')
+        if total_wp > 0:
+            _sc(ws, unit_price_row, 13, f'=M{discount_row}/{total_wp}', font=black_bold_font, align=center, border=thin_border, number_format='#,##0.000')
         else:
             _sc(ws, unit_price_row, 13, 0, font=black_bold_font, align=center, border=thin_border, number_format='#,##0.000')
         ws.row_dimensions[unit_price_row].height = 30
@@ -1388,13 +1311,13 @@ def create_summary_sheet(
         for ci in range(2, 13):
             ws.cell(row=unit_price_row, column=ci).border = thin_border
         ws.merge_cells(f'M{unit_price_row}:O{unit_price_row}')
-        if total_base_count > 0:
-            _sc(ws, unit_price_row, 13, f'=M{discount_row}/{total_base_count}', font=black_bold_font, align=center, border=thin_border, number_format='#,##0.000')
+        if total_wp > 0:
+            _sc(ws, unit_price_row, 13, f'=M{discount_row}/{total_wp}', font=black_bold_font, align=center, border=thin_border, number_format='#,##0.000')
         else:
             _sc(ws, unit_price_row, 13, 0, font=black_bold_font, align=center, border=thin_border, number_format='#,##0.000')
         ws.row_dimensions[unit_price_row].height = 30
 
-    if not skip_freight and trade_method != 'EXW':
+    if not skip_freight and trade_method not in ('EXW', 'FAC'):
         freight_title_row = unit_price_row + 2
         ws.merge_cells(f'A{freight_title_row}:O{freight_title_row}')
         _part2_title = f'Part 2: Quotation - {trade_method} Freight Cost'
@@ -1514,8 +1437,8 @@ def create_summary_sheet(
         for cc in range(2, 13):
             ws.cell(row=fob_unit_row, column=cc).border = thin_border
         ws.merge_cells(f'M{fob_unit_row}:O{fob_unit_row}')
-        if total_base_count > 0:
-            _sc(ws, fob_unit_row, 13, f'=M{total_port_row}/{total_base_count}', font=black_bold_font, align=center, border=thin_border, number_format='#,##0.000')
+        if total_wp > 0:
+            _sc(ws, fob_unit_row, 13, f'=M{total_port_row}/{total_wp}', font=black_bold_font, align=center, border=thin_border, number_format='#,##0.000')
         else:
             _sc(ws, fob_unit_row, 13, 0, font=black_bold_font, align=center, border=thin_border, number_format='#,##0.000')
         for cc in (14, 15):

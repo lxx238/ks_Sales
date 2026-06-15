@@ -26,7 +26,7 @@ from backend.core.array_matcher import (
     find_accumulated_match,
     find_info_accumulated_match,
 )
-from backend.core.shared.sheet_utils import set_page_break_preview
+from backend.core.shared.sheet_utils import reorder_sheets_by_matrix_array, set_page_break_preview
 from backend.core.ja_nv.quotation_engine import (
     create_nv_detail_sheet,
     create_nv_summary_sheet,
@@ -274,6 +274,7 @@ def split_and_create_quotations(
                 need_weight=need_weight,
                 need_code=need_code,
                 missing_boards=effective_missing,
+                span_ew_override=config.get('cross_span', '') or None,
             )
             detail['angle'] = config.get('angle', '') or detail.get('angle', '') or (matrix_data or {}).get('angle', '')
             detail['matched_array'] = matched_array
@@ -365,6 +366,7 @@ def split_and_create_quotations(
                         need_weight=need_weight,
                         need_code=need_code,
                         missing_boards=_sub_array_info.get('missing_per_table', 0) or _bom_config_sub.get('missing_boards', 0) or 0,
+                        span_ew_override=_bom_config_sub.get('cross_span', '') or None,
                     )
                     detail['config'] = _bom_config_sub
                     detail['bom_key'] = _sb.get('bom_key', '') or 'accumulated'
@@ -462,6 +464,7 @@ def split_and_create_quotations(
                     need_weight=need_weight,
                     need_code=need_code,
                     missing_boards=first_entry.get('missing_per_table', 0) or bom_config.get('missing_boards', 0) or 0,
+                    span_ew_override=bom_config.get('cross_span', '') or None,
                 )
                 detail['config'] = bom_config
                 detail['bom_key'] = 'info_accumulated'
@@ -559,6 +562,7 @@ def split_and_create_quotations(
                     need_weight=need_weight,
                     need_code=need_code,
                     missing_boards=info_entry.get('missing_per_table', 0) or bom_config.get('missing_boards', 0) or 0,
+                    span_ew_override=bom_config.get('cross_span', '') or None,
                 )
                 detail['config'] = bom_config
                 detail['bom_key'] = 'fallback_rows_cols'
@@ -632,6 +636,7 @@ def split_and_create_quotations(
                     need_weight=need_weight,
                     need_code=need_code,
                     missing_boards=info_entry.get('missing_per_table', 0) or bom_config.get('missing_boards', 0) or 0,
+                    span_ew_override=bom_config.get('cross_span', '') or None,
                 )
                 detail['config'] = bom_config
                 detail['bom_key'] = f'forced_fallback_{matrix_index}'
@@ -777,6 +782,9 @@ def split_and_create_quotations(
             except ValueError:
                 return len(_array_order)
         all_detail_results.sort(key=_sort_key)
+
+    if all_detail_results and matrix_array_entries:
+        reorder_sheets_by_matrix_array(master_wb, all_detail_results, matrix_array_entries, log_prefix='[NV]')
 
     if all_detail_results:
         pile_summary = None

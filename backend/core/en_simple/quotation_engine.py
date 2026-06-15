@@ -31,6 +31,7 @@ from backend.core.shared.price_utils import (
     round_to_2_decimal,
     _get_discount_category,
     _is_standard_priced,
+    normalize_lookup_code,
 )
 from backend.core.shared.weight_utils import (
     extract_length_from_spec,
@@ -45,10 +46,8 @@ from backend.core.shared.text_utils import (
 )
 from backend.core.shared.product_utils import (
     _is_valid_product_code,
-    _match_exclude_group,
 )
 from backend.core.shared.constants import (
-    EXCLUDE_ITEM_GROUPS,
     CARBON_STEEL_PRICING_ATTRS,
     IMAGE_WIDTH,
     IMAGE_HEIGHT,
@@ -101,9 +100,18 @@ _LANG_NAME_KEY_MAP = {
 }
 
 
-def _resolve_product_name(price_info, product, lang='en'):
+def _resolve_product_name(price_info, product, lang='en', price_mapping=None):
     fallback = product.get('name', '')
     if not price_info:
+        if price_mapping:
+            _code = product.get('code', '')
+            for _lookup in (_code, normalize_lookup_code(_code)):
+                rec = price_mapping.get(_lookup) if _lookup else None
+                if rec:
+                    for key in _LANG_NAME_KEY_MAP.get(lang, ('name_en',)):
+                        val = rec.get(key)
+                        if val:
+                            return val
         return fallback
     for key in _LANG_NAME_KEY_MAP.get(lang, ('name_en',)):
         val = price_info.get(key)
@@ -139,15 +147,8 @@ def _is_carbon_steel_cached(product, price_info):
     return False
 
 
-def _classify_products_single_pass(all_products, price_mapping, delete_options, always_exclude, ko_exclude_options=None):
-    delete_options = delete_options or {}
-    ko_exclude_options = ko_exclude_options or {}
-    all_exclude_opts = {k: True for k in EXCLUDE_ITEM_GROUPS} if always_exclude else {}
-    for k in list(ko_exclude_options.keys()) + list(delete_options.keys()):
-        all_exclude_opts[k] = True
-    aluminum = []
-    carbon_steel = []
-    excluded = []
+def _classify_products_single_pass(all_products, price_mapping):
+    combined_products = []
     pile_products = []
     price_info_cache = {}
     for p in all_products:
@@ -168,23 +169,8 @@ def _classify_products_single_pass(all_products, price_mapping, delete_options, 
         qty = p.get('quantity', 0)
         if not qty or qty <= 0:
             continue
-        matched_group = _match_exclude_group(p, price_mapping, all_exclude_opts)
-        is_cs = _is_carbon_steel_cached(p, pi)
-        if matched_group:
-            if delete_options.get(matched_group):
-                continue
-            if ko_exclude_options.get(matched_group):
-                excluded.append(p)
-            else:
-                if is_cs:
-                    carbon_steel.append(p)
-                else:
-                    aluminum.append(p)
-        elif is_cs:
-            carbon_steel.append(p)
-        else:
-            aluminum.append(p)
-    return aluminum, carbon_steel, excluded, pile_products, price_info_cache
+        combined_products.append(p)
+    return combined_products, pile_products, price_info_cache
 
 
 def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
@@ -196,17 +182,15 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
                         sale_type='export',
                         ko_discount_rate=100, ko_steel_discount_rate=84,
                         ko_purchased_discount_rate=94, coating_thickness=10,
-                        delete_options=None, always_exclude_extra_items=False,
-                        ko_exclude_options=None, need_weight_code=False,
+                        need_weight_code=False,
                         need_total_qty=False,
                         lang='en',
                         discount_method='project',
                         **kwargs):
     all_products = list(bom_products) if bom_products else []
 
-    aluminum, carbon_steel, excluded, pile_products, price_info_cache = _classify_products_single_pass(
-        all_products, price_mapping, delete_options or {},
-        always_exclude_extra_items, ko_exclude_options or {}
+    combined_products, pile_products, price_info_cache = _classify_products_single_pass(
+        all_products, price_mapping
     )
 
     matrix_data = matrix_data or {}
@@ -296,8 +280,7 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
     for _i, _w in enumerate(_widths):
         ws.column_dimensions[get_column_letter(_i + 1)].width = _w
 
-    combined_products = aluminum + carbon_steel
-    all_render_products = combined_products + excluded
+    all_render_products = combined_products
     data_start_row = 9
     row_heights_temp = {1: 18, 2: 66, 3: 30, 4: 30, 5: 30, 6: 30, 7: 30, 8: 20, 9: 70.7}
     for row, height in row_heights_temp.items():
@@ -524,7 +507,7 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
             if price_info is None:
                 price_info = resolve_price_info(price_mapping, product_code, spec=product.get('spec', ''))
                 product['_price_info'] = price_info
-            en_name = _resolve_product_name(price_info, product, lang)
+            en_name = _resolve_product_name(price_info, product, lang, price_mapping)
             cn_name = (
                 price_info.get('name') or product.get('name', '')
             ) if price_info else product.get('name', '')
@@ -533,7 +516,7 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
                 if _name_info and not product.get('_price_info_no_spec'):
                     product['_price_info_no_spec'] = _name_info
                 if _name_info:
-                    en_name = _resolve_product_name(_name_info, product, lang)
+                    en_name = _resolve_product_name(_name_info, product, lang, price_mapping)
                     cn_name = _name_info.get('name') or cn_name
 
             row_product_map[row] = product
@@ -828,36 +811,6 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
         part1_total_table_row = current_row
         current_row = _write_group_totals(current_row, part1_sub_total, part1_total_all, output_kw, part1_sub_weight, part1_total_weight, data_first_row=part1_data_start, data_last_row=part1_data_end) + 1
 
-    part3_sub_total = 0.0
-    part3_total_all = 0.0
-    part3_sub_weight = 0.0
-    part3_total_weight = 0.0
-    if excluded:
-        ws.merge_cells(f'A{current_row}:{max_col_letter}{current_row}')
-        ws[f'A{current_row}'] = _t('excluded_notice', lang)
-        ws[f'A{current_row}'].font = red_small_font
-        ws[f'A{current_row}'].alignment = left_align
-        for c in range(1, max_col + 1):
-            ws.cell(row=current_row, column=c).border = thin_border
-        current_row += 1
-        ws.merge_cells(f'A{current_row}:{max_col_letter}{current_row}')
-        ws[f'A{current_row}'] = _t('excluded_title', lang)
-        ws[f'A{current_row}'].font = small_bold_font
-        ws[f'A{current_row}'].alignment = left_align
-        ws.row_dimensions[current_row].height = 40
-        for c in range(1, max_col + 1):
-            ws.cell(row=current_row, column=c).border = thin_border
-        current_row += 1
-        _write_group_header(current_row)
-        current_row += 1
-        part3_data_start = current_row
-        data_end, part3_sub_total, part3_sub_weight, _, _, _, _, _, _, _, _, _, _ = _write_product_rows(current_row, excluded)
-        part3_data_end = data_end
-        current_row = data_end + 1
-        part3_total_all = part3_sub_total
-        part3_total_weight = part3_sub_weight
-        current_row = _write_group_totals(current_row, part3_sub_total, part3_total_all, output_kw, part3_sub_weight, part3_total_weight, data_first_row=part3_data_start, data_last_row=part3_data_end) + 1
-
     last_data_row = current_row - 1
 
     def mark_missing_image(row_number):
@@ -918,7 +871,7 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
         unmatched_products_out.extend(local_unmatched)
 
     quotation_product_codes = set()
-    for p in combined_products + excluded:
+    for p in combined_products:
         c = str(p.get('code', '')).strip()
         if c:
             quotation_product_codes.add(c)
@@ -926,7 +879,7 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
     return {
         'sheet_name': sheet_name,
         'quotation_product_codes': quotation_product_codes,
-        'valid_products': len(combined_products) + len(excluded),
+        'valid_products': len(combined_products),
         'total_weight': 0,
         'total_price': grand_total,
         'part1_price_per_table': part1_sub_total,

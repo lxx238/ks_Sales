@@ -535,82 +535,77 @@ def split_and_create_quotations(
             matrix_entry = acc['matrix_entry']
             selected_boms = acc.get('selected_boms', [])
             accumulated_base = acc['accumulated_base']
+            merged_products = acc.get('merged_products', [])
 
             used_matrix_array_indices.add(m_idx)
 
             ma_rows = matrix_entry.get('rows', '')
             ma_cols = matrix_entry.get('cols', '')
             ma_qty = matrix_entry.get('table_qty', 1)
+            ma_miss = matrix_entry.get('missing_per_table', 0) or 0
 
             _accum_group_id = f"{ma_rows}×{ma_cols}_{ma_qty}"
 
-            for sub_idx, pb in enumerate(selected_boms):
-                pb_base = pb.get('base_count', 0) or 1
-                pb_products = pb.get('products') or []
-                pb_config = pb.get('config') or matrix_entry
+            sheet_prefix = f"{ma_rows}×{ma_cols}_{ma_qty}"
+            sheet_prefix = f"({m_idx + 1}){sheet_prefix}"
 
-                base_prefix = f"{ma_rows}×{ma_cols}_{pb_base}"
-                _sheet_prefix = f"({m_idx + 1}_{sub_idx + 1}){base_prefix}"
+            pb_config = (selected_boms[0].get('config') if selected_boms else None) or matrix_entry
+            span_info = pb_config.get('cross_span', '')
 
-                _sub_array_info = dict(matrix_entry)
-                _sub_array_info['table_qty'] = pb_base
+            effective_matrix_data = build_bom_matrix_data(
+                matrix_data, matrix_entry, bom_config=pb_config,
+            )
 
-                effective_matrix_data = build_bom_matrix_data(
-                    matrix_data, _sub_array_info, bom_config=pb_config,
+            array_info = f"{ma_rows}×{ma_cols}" if ma_rows and ma_cols else ''
+
+            try:
+                result = create_ksd_detail_sheet(
+                    None, master_wb, sheet_prefix, price_mapping,
+                    image_path=image_path,
+                    image_folder=image_folder,
+                    code_to_images=code_to_images,
+                    image_temp_dir=image_temp_dir,
+                    image_cache=image_cache,
+                    unmatched_products_list=all_unmatched_products,
+                    contact_info=contact_info,
+                    config=pb_config,
+                    matrix_data=effective_matrix_data,
+                    sale_type=sale_type,
+                    ko_discount_rate=ko_discount_rate,
+                    ko_steel_discount_rate=ko_steel_discount_rate,
+                    ko_purchased_discount_rate=ko_purchased_discount_rate,
+                    coating_thickness=coating_thickness,
+                    delete_options=delete_options,
+                    always_exclude_extra_items=always_exclude_extra_items,
+                    ko_exclude_options=ko_exclude_options,
+                    trade_method=trade_method,
+                    pre_parsed_products=(merged_products, array_info, span_info),
+                    ko_ddp_address=ko_ddp_address,
+                    need_weight_code=need_weight_code,
                 )
-                effective_matrix_data['set_count'] = 1
+                result['config'] = pb_config
+                result['matched_array'] = matrix_entry
+                result['matrix_data'] = effective_matrix_data
+                result['set_count'] = ma_qty
+                result['_matrix_idx'] = m_idx
+                result['accumulated_group_id'] = _accum_group_id
+                result['accumulated_sub_idx'] = 0
+                all_quotation_results.append(result)
 
-                array_info = f"{ma_rows}×{ma_cols}" if ma_rows and ma_cols else ''
-                span_info = pb_config.get('cross_span', '')
+                pile_prods = result.get('pile_products', [])
+                if pile_prods:
+                    for pp in pile_prods:
+                        scaled = dict(pp)
+                        scaled['quantity'] = float(pp.get('quantity', 0)) * ma_qty
+                        pile_products_all.append(scaled)
 
-                try:
-                    result = create_ksd_detail_sheet(
-                        None, master_wb, _sheet_prefix, price_mapping,
-                        image_path=image_path,
-                        image_folder=image_folder,
-                        code_to_images=code_to_images,
-                        image_temp_dir=image_temp_dir,
-                        image_cache=image_cache,
-                        unmatched_products_list=all_unmatched_products,
-                        contact_info=contact_info,
-                        config=pb_config,
-                        matrix_data=effective_matrix_data,
-                        sale_type=sale_type,
-                        ko_discount_rate=ko_discount_rate,
-                        ko_steel_discount_rate=ko_steel_discount_rate,
-                        ko_purchased_discount_rate=ko_purchased_discount_rate,
-                        coating_thickness=coating_thickness,
-                        delete_options=delete_options,
-                        always_exclude_extra_items=always_exclude_extra_items,
-                        ko_exclude_options=ko_exclude_options,
-                        trade_method=trade_method,
-                        pre_parsed_products=(pb_products, array_info, span_info),
-                        ko_ddp_address=ko_ddp_address,
-                        need_weight_code=need_weight_code,
-                    )
-                    result['config'] = pb_config
-                    result['matched_array'] = matrix_entry
-                    result['matrix_data'] = effective_matrix_data
-                    result['set_count'] = 1
-                    result['_matrix_idx'] = m_idx
-                    result['accumulated_group_id'] = _accum_group_id
-                    result['accumulated_sub_idx'] = sub_idx
-                    all_quotation_results.append(result)
-
-                    pile_prods = result.get('pile_products', [])
-                    if pile_prods:
-                        for pp in pile_prods:
-                            scaled = dict(pp)
-                            scaled['quantity'] = float(pp.get('quantity', 0)) * pb_base
-                            pile_products_all.append(scaled)
-
-                    print(f"   ✅ SIMPLE accumulated detail: {result['sheet_name']} "
-                          f"(sub {sub_idx + 1}/{len(selected_boms)}, base={pb_base}, "
-                          f"part1={result.get('part1_price_per_table', 0):.2f})")
-                except Exception as e:
-                    import traceback
-                    print(f"   ❌ SIMPLE accumulated detail failed: {e}")
-                    traceback.print_exc()
+                print(f"   ✅ SIMPLE accumulated detail: {result['sheet_name']} "
+                      f"({len(selected_boms)} BOMs merged, base={ma_qty}, "
+                      f"part1={result.get('part1_price_per_table', 0):.2f})")
+            except Exception as e:
+                import traceback
+                print(f"   ❌ SIMPLE accumulated detail failed: {e}")
+                traceback.print_exc()
 
     # ========== 信息表累加匹配 (多个小信息表 → 一个大BOM) ==========
     if pending_boms and has_explicit_matrix_arrays and matrix_array_entries:

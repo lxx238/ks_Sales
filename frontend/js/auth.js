@@ -28,7 +28,7 @@ function isLoginPage() {
 function getPermissionFirstPage(auth) {
     if (!auth) return 'quotation';
     if (auth.role === 'admin') return 'quotation';
-    const permPageMap = ['quotation', 'cad', 'database', 'records', 'questions'];
+    const permPageMap = ['quotation', 'cad', 'database', 'records', 'questions', 'logistics'];
     const perms = auth.permissions || [];
     for (const perm of permPageMap) {
         if (perms.includes(perm)) return perm;

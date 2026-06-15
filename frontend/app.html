@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="css/bom.css">
   <link rel="stylesheet" href="css/cad.css">
   <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/logistics.css">
 </head>
 <body>
   <div class="app-shell">
@@ -35,6 +36,7 @@
           <a class="btn" data-nav-group="韩语组">韩语组</a>
           <a class="btn" data-nav-group="英语组">英语组</a>
           <a class="btn" data-nav-group="日语组">日语组</a>
+          <a class="btn" data-nav-group="物流组">物流组</a>
         </div>
         <nav class="sidebar-nav">
           <span class="sidebar-label">功能导航</span>
@@ -48,6 +50,7 @@
           <a class="btn" href="#" data-nav-page="temp-price">临时价格设置</a>
           <a class="btn" href="#" data-nav-page="temp-price-query">临时价格查询</a>
           <a class="btn" href="#" data-nav-page="questions">问答中心</a>
+          <a class="btn" href="#" data-nav-page="logistics">物流排柜汇总</a>
           <a class="btn" href="#" data-nav-page="dashboard">人员使用情况大屏</a>
         </nav>
         <nav class="sidebar-nav" id="admin-nav" style="display:none;">
@@ -102,6 +105,7 @@
   <script src="js/pages/temp_price.js"></script>
   <script src="js/pages/temp_price_query.js"></script>
   <script src="js/pages/dashboard.js"></script>
+  <script src="js/pages/logistics.js"></script>
   <script>
     KSRouter.register('quotation', window.QuotationPage);
     KSRouter.register('fencegate', window.FenceGatePage);
@@ -120,6 +124,7 @@
     KSRouter.register('temp-price', window.TempPricePage);
     KSRouter.register('temp-price-query', window.TempPriceQueryPage);
     KSRouter.register('dashboard', window.DashboardPage);
+    KSRouter.register('logistics', window.LogisticsPage);
 
     document.addEventListener('DOMContentLoaded', async () => {
       const authPromise = window.ksAuthSyncPromise;
@@ -158,7 +163,7 @@
       }
 
       const heroTitle = document.getElementById('hero-title');
-      if (heroTitle) heroTitle.textContent = `${group} BOM智能报价系统`;
+      if (heroTitle) heroTitle.textContent = group === '物流组' ? `${group} 智能汇总单生成器` : `${group} BOM智能报价系统`;
 
       const adminNav = document.getElementById('admin-nav');
       const adminLink = document.getElementById('admin-link');
@@ -167,7 +172,18 @@
         if (adminLink) adminLink.style.display = '';
       }
 
-      if (!isAdmin) {
+      const isLogisticsGroup = group === '物流组';
+      if (isLogisticsGroup) {
+        document.querySelectorAll('[data-nav-page]').forEach(el => {
+          if (el.getAttribute('data-nav-page') !== 'logistics') {
+            el.style.display = 'none';
+          }
+        });
+      } else {
+        const logisticsNav = document.querySelector('[data-nav-page="logistics"]');
+        if (logisticsNav) logisticsNav.style.display = 'none';
+      }
+      if (!isAdmin && !isLogisticsGroup) {
         const perms = auth.permissions || [];
         const permPageMap = {
           'quotation': '[data-nav-page="quotation"]',
@@ -193,13 +209,26 @@
       }
 
       document.querySelectorAll('[data-nav-group]').forEach(el => {
-        el.classList.toggle('primary', el.getAttribute('data-nav-group') === group);
+        const g = el.getAttribute('data-nav-group');
+        if (isLogisticsGroup && g !== '物流组' && !isAdmin) {
+          el.style.display = 'none';
+        } else if (!isLogisticsGroup && g === '物流组' && !isAdmin) {
+          el.style.display = 'none';
+        }
+        el.classList.toggle('primary', g === group);
       });
 
       if (logoutBtn) {
         logoutBtn.onclick = () => {
           if (typeof logoutSession === 'function') logoutSession();
         };
+      }
+
+      if (isLogisticsGroup && !isAdmin) {
+        const params = new URLSearchParams(window.location.search);
+        if (!params.get('page')) params.set('page', 'logistics');
+        const newUrl = `${window.location.pathname}?${params.toString()}`;
+        window.history.replaceState({}, '', newUrl);
       }
 
       KSRouter.init();
@@ -213,6 +242,7 @@
           'records': 'records',
           'questions': 'questions',
           'temp-price': 'temp-price',
+          'logistics': 'logistics',
         };
         if (isAdmin) return;
         const perms = auth.permissions || [];
@@ -227,6 +257,7 @@
           'image-inquiry': 'quotation',
           questions: 'questions',
           'temp-price': 'temp-price',
+          logistics: 'logistics',
         };
         const required = permRequired[currentPage];
         if (required && !perms.includes(required)) {
@@ -253,6 +284,7 @@
             'image-inquiry': 'quotation',
             questions: 'questions',
             'temp-price': 'temp-price',
+            logistics: 'logistics',
           };
           const required = permRequired[page];
           if (required && !perms.includes(required)) {

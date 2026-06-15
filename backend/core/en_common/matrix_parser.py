@@ -45,6 +45,7 @@ def extract_matrix_data(file_path):
     project_name = ''
     max_wind_speed = ''
     max_snow_load = ''
+    ground_clearance = ''
     module_wattage = 0
     module_size = ''
     module_quantity = 0
@@ -54,7 +55,7 @@ def extract_matrix_data(file_path):
     arrays = []
 
     for r in range(total_rows):
-        if ncols < 14:
+        if ncols < 4:
             continue
         a_val = _safe_str(ws.iloc[r, 0])
         d_val = _safe_str(ws.iloc[r, 3]) if ncols > 3 else ''
@@ -76,6 +77,14 @@ def extract_matrix_data(file_path):
 
         if 'Wind Load' in a_val:
             max_wind_speed = d_val
+
+        if 'Ground Clearance' in a_val:
+            _gc = d_val if d_val else ''
+            if _gc:
+                _gc_num = _extract_number(_gc)
+                ground_clearance = int(_gc_num) if _gc_num is not None else _gc
+            else:
+                ground_clearance = ''
 
         if 'Installation Angle' in a_val:
             _angle_num = _extract_number(d_val)
@@ -111,6 +120,7 @@ def extract_matrix_data(file_path):
         'array_cols': arrays[0]['cols'] if arrays else 0,
         'max_wind_speed': max_wind_speed,
         'max_snow_load': max_snow_load,
+        'ground_clearance': ground_clearance if ground_clearance else 0,
         'module_wattage': module_wattage,
         'module_size': module_size,
         'panel_weight': '',

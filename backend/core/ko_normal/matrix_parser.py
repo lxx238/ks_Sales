@@ -242,9 +242,6 @@ def _parse_multi_arrays(df, header_info):
                         missing_total = int(round(mv))
                 except (ValueError, TypeError):
                     pass
-        missing_per_table = 0
-        if missing_total != 0 and table_qty and table_qty > 0:
-            missing_per_table = missing_total // table_qty
         arrays.append({
             'no': no_text,
             'rows': rows,
@@ -252,7 +249,7 @@ def _parse_multi_arrays(df, header_info):
             'table_qty': table_qty,
             'modules': modules,
             'base_count': table_qty if table_qty else 1,
-            'missing_per_table': missing_per_table,
+            'missing_per_table': missing_total,
         })
     return arrays
 

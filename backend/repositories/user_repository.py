@@ -9,7 +9,7 @@ from backend.utils.helpers import row_to_dict
 
 TABLE = 'ks_users'
 
-GROUP_SUFFIX = {'韩语组': '_h', '日语组': '_j', '英语组': '_e'}
+GROUP_SUFFIX = {'韩语组': '_h', '日语组': '_j', '英语组': '_e', '物流组': '_w'}
 
 ALL_PERMISSIONS = [
     'quotation',
@@ -20,6 +20,7 @@ ALL_PERMISSIONS = [
     'records',
     'records_review',
     'questions',
+    'logistics',
 ]
 
 ROLE_TARGETS = {
@@ -28,6 +29,7 @@ ROLE_TARGETS = {
     '英语业务员': 'app.html?group=英语组',
     '日语业务员': 'app.html?group=日语组',
     '业务助理': '',
+    '物流专员': 'app.html?group=物流组',
 }
 
 ROLE_LABELS = {
@@ -36,6 +38,7 @@ ROLE_LABELS = {
     '英语业务员': '英语业务员',
     '日语业务员': '日语业务员',
     '业务助理': '业务助理',
+    '物流专员': '物流专员',
 }
 
 CREATE_TABLE_SQL = f'''
@@ -60,7 +63,7 @@ CREATE TABLE IF NOT EXISTS {TABLE} (
 )
 '''
 
-GROUP_ROLE_MAP = {'韩语组': '韩语业务员', '英语组': '英语业务员', '日语组': '日语业务员'}
+GROUP_ROLE_MAP = {'韩语组': '韩语业务员', '英语组': '英语业务员', '日语组': '日语业务员', '物流组': '物流专员'}
 
 DEFAULT_USERS = [
     {'username': 'admin', 'password': 'Admin@123', 'name_china': '管理员', 'nickname': '', 'mob': '', 'tel': '', 'fax': '', 'email': '', 'group': '', 'role': 'admin', 'enabled': True, 'permissions': ALL_PERMISSIONS},

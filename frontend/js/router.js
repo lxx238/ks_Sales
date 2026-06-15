@@ -78,7 +78,7 @@ const KSRouter = {
     switchGroup(group) {
         const params = new URLSearchParams(window.location.search);
         params.set('group', group);
-        params.set('page', 'quotation');
+        params.set('page', group === '物流组' ? 'logistics' : 'quotation');
         const newUrl = `${window.location.pathname}?${params.toString()}#group=${group}`;
         window.location.href = newUrl;
     },
