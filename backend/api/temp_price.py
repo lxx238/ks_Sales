@@ -4,7 +4,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request, send_file
 
 from backend.config.settings import get_db_connection
-from backend.services.auth_service import ensure_permission
+from backend.services.auth_service import ensure_temp_price_access
 
 temp_price_bp = Blueprint('temp_price', __name__, url_prefix='/api/temp-price')
 
@@ -22,6 +22,7 @@ STANDARD_TON_TYPES = [
     {'key': 'FEC006', 'label': 'FEC006'},
     {'key': 'FEC020', 'label': 'FEC020'},
     {'key': 'FEC027', 'label': 'FEC027'},
+    {'key': 'FEC035', 'label': 'FEC035'},
     {'key': 'FEPJ_0103', 'label': 'FEPJ-0103'},
     {'key': 'FEPJ_0173', 'label': 'FEPJ-0173'},
     {'key': 'FEPJ_0178', 'label': 'FEPJ-0178'},
@@ -31,6 +32,16 @@ STANDARD_TON_TYPES = [
 ]
 
 STANDARD_TP_KEYS = {t['key'] for t in STANDARD_TON_TYPES}
+
+# 包装类型维度：吨价按「包装」区分（简易包装 / 铁托）
+# 吨价设置键末尾追加 _{pack} 后缀，默认简易包装
+PACK_TYPES = [
+    {'key': 'jybz', 'label': '简易包装'},
+    {'key': 'tietuo', 'label': '铁托'},
+]
+PACK_KEYS = [p['key'] for p in PACK_TYPES]
+PACK_LABELS = {p['key']: p['label'] for p in PACK_TYPES}
+DEFAULT_PACK = 'jybz'
 
 
 def _get_all_ton_types_with_settings(c):
@@ -76,20 +87,22 @@ def _get_all_ton_types(c):
     return list(STANDARD_TON_TYPES) + extra
 
 
-def _build_ton_keys(types):
+def _build_ton_keys(types, packs=None):
     keys = []
-    for tp in types:
-        k = tp['key']
-        if k.startswith('FEPJ_'):
-            for tt in TON_TIERS:
-                keys.append(f'ton_{k}_int_{tt}')
-            keys.append(f'ton_{k}_ext_50999')
-        else:
-            for tier in TIERS:
+    packs = packs or PACK_KEYS
+    for pk in packs:
+        for tp in types:
+            k = tp['key']
+            if k.startswith('FEPJ_'):
                 for tt in TON_TIERS:
-                    keys.append(f'ton_{k}_int_{tier}_{tt}')
-            for tier in TIERS:
-                keys.append(f'ton_{k}_ext_{tier}_50999')
+                    keys.append(f'ton_{k}_int_{tt}_{pk}')
+                keys.append(f'ton_{k}_ext_50999_{pk}')
+            else:
+                for tier in TIERS:
+                    for tt in TON_TIERS:
+                        keys.append(f'ton_{k}_int_{tier}_{tt}_{pk}')
+                for tier in TIERS:
+                    keys.append(f'ton_{k}_ext_{tier}_50999_{pk}')
     return keys
 
 
@@ -115,6 +128,25 @@ for cur in CURRENCIES:
         SHARED_KEYS.append(f'exchange_rate_{cur["key"]}')
         SHARED_KEYS.append(f'points_{cur["key"]}')
 
+# 汇率/点数分类（不同定价属性使用不同类别）
+RATE_CATEGORIES = [
+    {'key': 'dizhuang', 'label': '地桩', 'attrs': ['D']},
+    {'key': 'lv', 'label': '铝', 'attrs': ['M']},
+    {'key': 'lvpj', 'label': '铝配件', 'attrs': ['F', 'Q']},
+    {'key': 'tie', 'label': '铁', 'attrs': ['WTX', 'WTP']},
+    {'key': 'waigou', 'label': '外购件', 'attrs': ['W']},
+]
+RATE_CATEGORY_KEYS = []
+for _cat in RATE_CATEGORIES:
+    for cur in CURRENCIES:
+        if cur['has_rate']:
+            RATE_CATEGORY_KEYS.append(f'exchange_rate_{_cat["key"]}_{cur["key"]}')
+            RATE_CATEGORY_KEYS.append(f'points_{_cat["key"]}_{cur["key"]}')
+
+# 铝配件额外系数（计算时 base × 系数，默认 1.03，前端可修改）
+RATE_COEFFICIENT_KEYS = ['lvpj_coefficient']
+ALL_RATE_KEYS = RATE_CATEGORY_KEYS + RATE_COEFFICIENT_KEYS
+
 
 def _all_keys_for_types(types):
     return _build_ton_keys(types) + SHARED_KEYS
@@ -125,12 +157,13 @@ ALL_SETTINGS_KEYS = TON_KEYS + SHARED_KEYS
 
 PRICE_COLS = []
 PRICE_COL_MAP = {}
-for side, ton in VALID_SIDE_TON:
-    for length in MAT_LEN_TIERS:
-        for cur in CURRENCIES:
-            col = f'{SIDE_KEYS[side]}_{ton}_{length}_{cur["key"]}'
-            PRICE_COLS.append(col)
-            PRICE_COL_MAP[(side, ton, length, cur['key'])] = col
+for pk in PACK_KEYS:
+    for side, ton in VALID_SIDE_TON:
+        for length in MAT_LEN_TIERS:
+            for cur in CURRENCIES:
+                col = f'{SIDE_KEYS[side]}_{ton}_{length}_{cur["key"]}_{pk}'
+                PRICE_COLS.append(col)
+                PRICE_COL_MAP[(side, ton, length, cur['key'], pk)] = col
 
 
 def _conn():
@@ -178,7 +211,7 @@ def _ensure_material_cols(c):
 
 @temp_price_bp.get('/settings')
 def get_settings():
-    ensure_permission('temp-price')
+    ensure_temp_price_access()
     c = _conn()
     try:
         all_types = _get_all_ton_types(c)
@@ -196,6 +229,8 @@ def get_settings():
             'currencies': CURRENCIES,
             'tonPriceTypes': all_types,
             'standardTonTypes': STANDARD_TON_TYPES,
+            'packTypes': PACK_TYPES,
+            'defaultPack': DEFAULT_PACK,
             'tiers': TIERS, 'tierLabels': TIER_LABELS,
             'tonTiers': TON_TIERS, 'tonTierLabels': TON_TIER_LABELS,
             'sharedKeys': SHARED_KEYS,
@@ -206,9 +241,102 @@ def get_settings():
         c.close()
 
 
+@temp_price_bp.get('/price-cache')
+def list_price_cache_route():
+    ensure_temp_price_access()
+    from backend.repositories.inquiry_repository import list_price_cache
+    keyword = (request.args.get('keyword') or '').strip()
+    limit = request.args.get('limit', type=int) or 2000
+    limit = max(1, min(limit, 5000))
+    items = list_price_cache(keyword=keyword or None, limit=limit)
+    return jsonify({'success': True, 'items': items, 'total': len(items)})
+
+
+@temp_price_bp.post('/price-cache/batch-delete')
+def batch_delete_price_cache_route():
+    ensure_temp_price_access(write=True)
+    from backend.repositories.inquiry_repository import delete_price_cache_items
+    data = request.get_json(silent=True) or {}
+    raw_ids = data.get('ids') or []
+    ids = []
+    for v in raw_ids:
+        try:
+            ids.append(int(v))
+        except (TypeError, ValueError):
+            continue
+    deleted = delete_price_cache_items(ids)
+    return jsonify({'success': True, 'deleted': deleted})
+
+
+@temp_price_bp.post('/price-cache/cleanup-expired')
+def cleanup_expired_price_cache_route():
+    ensure_temp_price_access(write=True)
+    from backend.repositories.inquiry_repository import delete_expired_price_cache
+    data = request.get_json(silent=True) or {}
+    days = data.get('days', 7)
+    try:
+        days = int(days)
+    except (TypeError, ValueError):
+        days = 7
+    deleted = delete_expired_price_cache(days)
+    return jsonify({'success': True, 'deleted': deleted})
+
+
+@temp_price_bp.get('/rate-settings')
+def get_rate_settings():
+    ensure_temp_price_access()
+    c = _conn()
+    try:
+        _ensure_settings(c, ALL_RATE_KEYS)
+        r = c.execute(f'SELECT * FROM {TBL_S} WHERE id=1').fetchone()
+        result = {}
+        if r:
+            cols = r.keys()
+            for k in ALL_RATE_KEYS:
+                result[k] = r[k] if k in cols else None
+        return jsonify({
+            'success': True,
+            'settings': result,
+            'currencies': [cur for cur in CURRENCIES if cur['has_rate']],
+            'rate_categories': RATE_CATEGORIES,
+        })
+    finally:
+        c.close()
+
+
+@temp_price_bp.post('/rate-settings')
+def update_rate_settings():
+    ensure_temp_price_access(write=True)
+    body = request.get_json(silent=True) or {}
+    d = body.get('settings') or {}
+    c = _conn()
+    try:
+        _ensure_settings(c, ALL_RATE_KEYS)
+        set_parts = []
+        vals = []
+        for k in ALL_RATE_KEYS:
+            if k in d:
+                set_parts.append(f'{k}=?')
+                vals.append(_f(d.get(k)))
+        if set_parts:
+            set_parts.append("updated_at=datetime('now','localtime')")
+            vals.append(1)
+            c.execute(f'UPDATE {TBL_S} SET {",".join(set_parts)} WHERE id=?', vals)
+            c.commit()
+        r = c.execute(f'SELECT * FROM {TBL_S} WHERE id=1').fetchone()
+        result = {}
+        if r:
+            cols = r.keys()
+            for k in ALL_RATE_KEYS:
+                result[k] = r[k] if k in cols else None
+        return jsonify({'success': True, 'settings': result})
+    finally:
+        c.close()
+
+
 @temp_price_bp.get('/export')
 def export_excel():
-    ensure_permission('temp-price')
+    ensure_temp_price_access()
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill
     from openpyxl.utils import get_column_letter
@@ -225,13 +353,13 @@ def export_excel():
     export_cols = []
     export_labels = []
     for cur in CURRENCIES:
-        col_key = PRICE_COL_MAP.get(('int', ton_tier, len_tier, cur['key']))
+        col_key = PRICE_COL_MAP.get(('int', ton_tier, len_tier, cur['key'], DEFAULT_PACK))
         if col_key:
             export_cols.append(col_key)
             export_labels.append(f'{cur["label"]}-内部')
     if show_ext:
         for cur in CURRENCIES:
-            col_key = PRICE_COL_MAP.get(('ext', ton_tier, len_tier, cur['key']))
+            col_key = PRICE_COL_MAP.get(('ext', ton_tier, len_tier, cur['key'], DEFAULT_PACK))
             if col_key:
                 export_cols.append(col_key)
                 export_labels.append(f'{cur["label"]}-外部')
@@ -311,14 +439,14 @@ def export_excel():
             is_pj = k.startswith('FEPJ_')
             ws_s[f'A{row}'] = tp['label']
             if is_pj:
-                key_int = f'ton_{k}_int_{settings_ton}'
+                key_int = f'ton_{k}_int_{settings_ton}_{DEFAULT_PACK}'
                 ws_s[f'B{row}'] = _f(s[key_int] if key_int in s_cols else None)
-                key_ext = f'ton_{k}_ext_50999'
+                key_ext = f'ton_{k}_ext_50999_{DEFAULT_PACK}'
                 ws_s[f'C{row}'] = _f(s[key_ext] if key_ext in s_cols else None)
             else:
-                key_int = f'ton_{k}_int_{settings_len}_{settings_ton}'
+                key_int = f'ton_{k}_int_{settings_len}_{settings_ton}_{DEFAULT_PACK}'
                 ws_s[f'B{row}'] = _f(s[key_int] if key_int in s_cols else None)
-                key_ext = f'ton_{k}_ext_{settings_len}_50999'
+                key_ext = f'ton_{k}_ext_{settings_len}_50999_{DEFAULT_PACK}'
                 ws_s[f'C{row}'] = _f(s[key_ext] if key_ext in s_cols else None)
 
         ws_s.column_dimensions['A'].width = 16
@@ -390,7 +518,7 @@ def export_excel():
 
 @temp_price_bp.get('/materials')
 def get_materials():
-    ensure_permission('temp-price')
+    ensure_temp_price_access()
     page = max(1, request.args.get('page', 1, type=int))
     ps = min(200, max(1, request.args.get('pageSize', 50, type=int)))
     c = _conn()
@@ -422,7 +550,7 @@ def _f(v):
 
 @temp_price_bp.post('/update')
 def update_prices():
-    ensure_permission('temp-price')
+    ensure_temp_price_access(write=True)
     body = request.get_json(silent=True) or {}
     d = body.get('settings') or {}
 
@@ -460,40 +588,41 @@ def update_prices():
             is_pj = tp_type.startswith('FEPJ_')
             price_vals = {}
 
-            for side, ton in VALID_SIDE_TON:
-                ti = MAT_TON_TIERS.index(ton)
-                ton_settings_key = TON_TIERS[ti]
-                for li, length in enumerate(MAT_LEN_TIERS):
-                    len_settings_key = TIERS[li]
-                    for cur in CURRENCIES:
-                        ck = cur['key']
-                        has_rate = cur['has_rate']
-                        col = PRICE_COL_MAP[(side, ton, length, ck)]
+            for pk in PACK_KEYS:
+                for side, ton in VALID_SIDE_TON:
+                    ti = MAT_TON_TIERS.index(ton)
+                    ton_settings_key = TON_TIERS[ti]
+                    for li, length in enumerate(MAT_LEN_TIERS):
+                        len_settings_key = TIERS[li]
+                        for cur in CURRENCIES:
+                            ck = cur['key']
+                            has_rate = cur['has_rate']
+                            col = PRICE_COL_MAP[(side, ton, length, ck, pk)]
 
-                        if side == 'int':
-                            if is_pj:
-                                k_int = f'ton_{tp_type}_int_{ton_settings_key}'
+                            if side == 'int':
+                                if is_pj:
+                                    k_int = f'ton_{tp_type}_int_{ton_settings_key}_{pk}'
+                                else:
+                                    k_int = f'ton_{tp_type}_int_{len_settings_key}_{ton_settings_key}_{pk}'
+                                ton_int = _f(s[k_int] if k_int in s_cols else None)
+                                if has_rate:
+                                    ex = _f(s[f'exchange_rate_{ck}'] if f'exchange_rate_{ck}' in s_cols else None)
+                                    pt = _f(s[f'points_{ck}'] if f'points_{ck}' in s_cols else None)
+                                    price_vals[col] = round(w * ton_int / ex / pt, 6) if ex > 0 and pt > 0 else 0
+                                else:
+                                    price_vals[col] = round(w * ton_int, 6)
                             else:
-                                k_int = f'ton_{tp_type}_int_{len_settings_key}_{ton_settings_key}'
-                            ton_int = _f(s[k_int] if k_int in s_cols else None)
-                            if has_rate:
-                                ex = _f(s[f'exchange_rate_{ck}'] if f'exchange_rate_{ck}' in s_cols else None)
-                                pt = _f(s[f'points_{ck}'] if f'points_{ck}' in s_cols else None)
-                                price_vals[col] = round(w * ton_int / ex / pt, 6) if ex > 0 and pt > 0 else 0
-                            else:
-                                price_vals[col] = round(w * ton_int, 6)
-                        else:
-                            if is_pj:
-                                k_ext = f'ton_{tp_type}_ext_50999'
-                            else:
-                                k_ext = f'ton_{tp_type}_ext_{len_settings_key}_50999'
-                            ton_ext = _f(s[k_ext] if k_ext in s_cols else None)
-                            if has_rate:
-                                ex = _f(s[f'exchange_rate_{ck}'] if f'exchange_rate_{ck}' in s_cols else None)
-                                pt = _f(s[f'points_{ck}'] if f'points_{ck}' in s_cols else None)
-                                price_vals[col] = round(w * ton_ext / ex / pt, 6) if ex > 0 and pt > 0 else 0
-                            else:
-                                price_vals[col] = round(w * ton_ext, 6)
+                                if is_pj:
+                                    k_ext = f'ton_{tp_type}_ext_50999_{pk}'
+                                else:
+                                    k_ext = f'ton_{tp_type}_ext_{len_settings_key}_50999_{pk}'
+                                ton_ext = _f(s[k_ext] if k_ext in s_cols else None)
+                                if has_rate:
+                                    ex = _f(s[f'exchange_rate_{ck}'] if f'exchange_rate_{ck}' in s_cols else None)
+                                    pt = _f(s[f'points_{ck}'] if f'points_{ck}' in s_cols else None)
+                                    price_vals[col] = round(w * ton_ext / ex / pt, 6) if ex > 0 and pt > 0 else 0
+                                else:
+                                    price_vals[col] = round(w * ton_ext, 6)
 
             set_sql = ', '.join(f'"{col}"=?' for col in price_vals)
             c.execute(
@@ -513,7 +642,7 @@ def update_prices():
 
 @temp_price_bp.get('/lookup')
 def lookup_material():
-    ensure_permission('temp-price')
+    ensure_temp_price_access()
     code = str(request.args.get('code') or '').strip()
     if not code:
         return jsonify({'success': False, 'message': '\u5de5\u7a0b\u7f16\u7801\u4e0d\u80fd\u4e3a\u7a7a'}), 400
@@ -574,7 +703,7 @@ def lookup_material():
 
 @temp_price_bp.post('/material')
 def add_material():
-    ensure_permission('temp-price')
+    ensure_temp_price_access(write=True)
     d = request.get_json(silent=True) or {}
     code = str(d.get('\u5de5\u7a0b\u7f16\u7801') or '').strip()
     if not code:
@@ -599,7 +728,7 @@ def add_material():
 
 @temp_price_bp.put('/material/<code>')
 def edit_material(code):
-    ensure_permission('temp-price')
+    ensure_temp_price_access(write=True)
     d = request.get_json(silent=True) or {}
     c = _conn()
     try:
@@ -626,7 +755,7 @@ def edit_material(code):
 
 @temp_price_bp.post('/materials/delete')
 def delete_materials():
-    ensure_permission('temp-price')
+    ensure_temp_price_access(write=True)
     d = request.get_json(silent=True) or {}
     codes = d.get('codes') or []
     if not codes:
@@ -646,7 +775,7 @@ def delete_materials():
 
 @temp_price_bp.get('/export-ton')
 def export_ton_prices():
-    ensure_permission('temp-price')
+    ensure_temp_price_access()
     import openpyxl
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
     from openpyxl.utils import get_column_letter
@@ -658,8 +787,7 @@ def export_ton_prices():
         s_cols = s.keys()
 
         wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = '\u5428\u4ef7\u5e95\u8868'
+        wb.remove(wb.active)
 
         hdr_fill = PatternFill(fill_type='solid', start_color='DDEBF7', end_color='DDEBF7')
         hdr_font = Font(bold=True)
@@ -667,89 +795,98 @@ def export_ton_prices():
         thin = Side(style='thin', color='D9E2F3')
         border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-        ws.merge_cells('A1:A2')
-        ws['A1'] = '\u7f16\u7801'
-        ws['A1'].font = hdr_font
-        ws['A1'].fill = hdr_fill
-        ws['A1'].alignment = center
-        ws['A1'].border = border
-        ws['A2'].border = border
-
-        group_headers = [
-            ('\u5185\u90e8 0-5\u5428', 3),
-            ('\u5185\u90e8 5-50\u5428', 3),
-            ('\u5185\u90e8 50-999\u5428', 3),
-            ('\u5916\u90e8 50-999\u5428', 3),
-        ]
-        col = 2
-        for label, span in group_headers:
-            cell = ws.cell(row=1, column=col)
-            cell.value = label
-            cell.font = hdr_font
-            cell.fill = hdr_fill
-            cell.alignment = center
-            cell.border = border
-            ws.merge_cells(start_row=1, start_column=col, end_row=1, end_column=col + span - 1)
-            for c2 in range(col, col + span):
-                ws.cell(row=1, column=c2).border = border
-            col += span
-
-        sub_headers = ['0-1', '1-3', '3+'] * 4
-        for i, sh in enumerate(sub_headers):
-            cell = ws.cell(row=2, column=2 + i)
-            cell.value = sh
-            cell.font = hdr_font
-            cell.fill = hdr_fill
-            cell.alignment = center
-            cell.border = border
-
         all_types = _get_all_ton_types_with_settings(conn)
-        for ri, tp in enumerate(all_types):
-            row = 3 + ri
-            k = tp['key']
-            is_pj = k.startswith('FEPJ_')
-            ws.cell(row=row, column=1, value=tp['label']).border = border
-            ws.cell(row=row, column=1).font = Font(bold=True)
-            ci = 2
-            for gi in range(4):
-                if is_pj:
-                    if gi < 3:
-                        key = f'ton_{k}_int_{TON_TIERS[gi]}'
-                    else:
-                        key = f'ton_{k}_ext_50999'
-                    raw = s[key] if key in s_cols else None
-                    val = float(raw) if raw is not None else None
-                    ws.merge_cells(start_row=row, start_column=ci, end_row=row, end_column=ci + 2)
-                    cell = ws.cell(row=row, column=ci, value=val)
-                    cell.border = border
-                    cell.alignment = center
-                    for c2 in range(ci, ci + 3):
-                        ws.cell(row=row, column=c2).border = border
-                    ci += 3
-                else:
-                    if gi < 3:
-                        tt = TON_TIERS[gi]
-                        for lt in TIERS:
-                            key = f'ton_{k}_int_{lt}_{tt}'
-                            raw = s[key] if key in s_cols else None
-                            val = float(raw) if raw is not None else None
-                            cell = ws.cell(row=row, column=ci, value=val)
-                            cell.border = border
-                            cell.alignment = center
-                            ci += 1
-                    else:
-                        for lt in TIERS:
-                            key = f'ton_{k}_ext_{lt}_50999'
-                            raw = s[key] if key in s_cols else None
-                            val = float(raw) if raw is not None else None
-                            cell = ws.cell(row=row, column=ci, value=val)
-                            cell.border = border
-                            cell.alignment = center
-                            ci += 1
 
-        ws.column_dimensions['A'].width = 14
-        for c2 in range(2, 14):
-            ws.column_dimensions[get_column_letter(c2)].width = 12
+        # pack 查询参数：仅导出指定包装的单 Sheet（与当前录入包装一致，便于导入回写）
+        query_pack = str(request.args.get('pack') or '').strip().lower()
+        export_packs = [p for p in PACK_TYPES if p['key'] == query_pack] if query_pack in PACK_KEYS else PACK_TYPES
+
+        for pk in export_packs:
+            pack_key = pk['key']
+            ws = wb.create_sheet(title=pk['label'])
+
+            ws.merge_cells('A1:A2')
+            ws['A1'] = '\u7f16\u7801'
+            ws['A1'].font = hdr_font
+            ws['A1'].fill = hdr_fill
+            ws['A1'].alignment = center
+            ws['A1'].border = border
+            ws['A2'].border = border
+
+            group_headers = [
+                ('\u5185\u90e8 0-5\u5428', 3),
+                ('\u5185\u90e8 5-50\u5428', 3),
+                ('\u5185\u90e8 50-999\u5428', 3),
+                ('\u5916\u90e8 50-999\u5428', 3),
+            ]
+            col = 2
+            for label, span in group_headers:
+                cell = ws.cell(row=1, column=col)
+                cell.value = label
+                cell.font = hdr_font
+                cell.fill = hdr_fill
+                cell.alignment = center
+                cell.border = border
+                ws.merge_cells(start_row=1, start_column=col, end_row=1, end_column=col + span - 1)
+                for c2 in range(col, col + span):
+                    ws.cell(row=1, column=c2).border = border
+                col += span
+
+            sub_headers = ['0-1', '1-3', '3+'] * 4
+            for i, sh in enumerate(sub_headers):
+                cell = ws.cell(row=2, column=2 + i)
+                cell.value = sh
+                cell.font = hdr_font
+                cell.fill = hdr_fill
+                cell.alignment = center
+                cell.border = border
+
+            for ri, tp in enumerate(all_types):
+                row = 3 + ri
+                k = tp['key']
+                is_pj = k.startswith('FEPJ_')
+                ws.cell(row=row, column=1, value=tp['label']).border = border
+                ws.cell(row=row, column=1).font = Font(bold=True)
+                ci = 2
+                for gi in range(4):
+                    if is_pj:
+                        if gi < 3:
+                            key = f'ton_{k}_int_{TON_TIERS[gi]}_{pack_key}'
+                        else:
+                            key = f'ton_{k}_ext_50999_{pack_key}'
+                        raw = s[key] if key in s_cols else None
+                        val = float(raw) if raw is not None else None
+                        ws.merge_cells(start_row=row, start_column=ci, end_row=row, end_column=ci + 2)
+                        cell = ws.cell(row=row, column=ci, value=val)
+                        cell.border = border
+                        cell.alignment = center
+                        for c2 in range(ci, ci + 3):
+                            ws.cell(row=row, column=c2).border = border
+                        ci += 3
+                    else:
+                        if gi < 3:
+                            tt = TON_TIERS[gi]
+                            for lt in TIERS:
+                                key = f'ton_{k}_int_{lt}_{tt}_{pack_key}'
+                                raw = s[key] if key in s_cols else None
+                                val = float(raw) if raw is not None else None
+                                cell = ws.cell(row=row, column=ci, value=val)
+                                cell.border = border
+                                cell.alignment = center
+                                ci += 1
+                        else:
+                            for lt in TIERS:
+                                key = f'ton_{k}_ext_{lt}_50999_{pack_key}'
+                                raw = s[key] if key in s_cols else None
+                                val = float(raw) if raw is not None else None
+                                cell = ws.cell(row=row, column=ci, value=val)
+                                cell.border = border
+                                cell.alignment = center
+                                ci += 1
+
+            ws.column_dimensions['A'].width = 14
+            for c2 in range(2, 14):
+                ws.column_dimensions[get_column_letter(c2)].width = 12
 
         buffer = io.BytesIO()
         wb.save(buffer)
@@ -769,7 +906,7 @@ def export_ton_prices():
 
 @temp_price_bp.post('/import-ton')
 def import_ton_prices():
-    ensure_permission('temp-price')
+    ensure_temp_price_access(write=True)
     import openpyxl
 
     file_storage = request.files.get('file')
@@ -785,64 +922,83 @@ def import_ton_prices():
         _ensure_settings(conn)
 
         wb = openpyxl.load_workbook(file_storage, data_only=True)
-        ws = wb.active
 
         updated_keys = {}
 
-        for row_idx in range(3, ws.max_row + 1):
-            code_cell = ws.cell(row=row_idx, column=1).value
-            if not code_cell:
-                continue
-            code_str = str(code_cell).strip()
+        # 包装归属优先级：前端传入的 pack 查询参数（当前选中包装）> Sheet 名（简易包装/铁托）
+        # > 旧版单 Sheet 默认简易包装
+        query_pack = str(request.args.get('pack') or '').strip().lower()
+        forced_pack = query_pack if query_pack in PACK_KEYS else None
 
-            tp_match = None
-            for tp in STANDARD_TON_TYPES:
-                if tp['label'] == code_str or tp['key'] == code_str:
-                    tp_match = tp
-                    break
-
-            if tp_match:
-                k = tp_match['key']
-                is_pj = k.startswith('FEPJ_')
+        # 每个 Sheet 对应一种包装：Sheet 名称为包装标签（简易包装/铁托），
+        # 兼容旧版单 Sheet（无包装标识）→ 按默认简易包装导入
+        for ws in wb.worksheets:
+            if forced_pack:
+                pack_key = forced_pack
             else:
-                if code_str.startswith('FEPJ'):
-                    k = code_str.replace('-', '_')
-                    is_pj = True
-                elif _is_valid_ton_key(code_str):
-                    k = code_str
-                    is_pj = False
+                sheet_name = str(ws.title or '').strip()
+                pack_key = None
+                for pk in PACK_TYPES:
+                    if sheet_name == pk['label'] or sheet_name == pk['key']:
+                        pack_key = pk['key']
+                        break
+                if pack_key is None and wb.index(ws) == 0:
+                    pack_key = DEFAULT_PACK  # 旧版单表 → 简易包装
+
+            for row_idx in range(3, ws.max_row + 1):
+                code_cell = ws.cell(row=row_idx, column=1).value
+                if not code_cell:
+                    continue
+                code_str = str(code_cell).strip()
+
+                tp_match = None
+                for tp in STANDARD_TON_TYPES:
+                    if tp['label'] == code_str or tp['key'] == code_str:
+                        tp_match = tp
+                        break
+
+                if tp_match:
+                    k = tp_match['key']
+                    is_pj = k.startswith('FEPJ_')
                 else:
-                    continue
-                if not _is_valid_ton_key(k):
-                    continue
+                    if code_str.startswith('FEPJ'):
+                        k = code_str.replace('-', '_')
+                        is_pj = True
+                    elif _is_valid_ton_key(code_str):
+                        k = code_str
+                        is_pj = False
+                    else:
+                        continue
+                    if not _is_valid_ton_key(k):
+                        continue
 
-            ci = 2
+                ci = 2
 
-            if is_pj:
-                for tt in TON_TIERS:
+                if is_pj:
+                    for tt in TON_TIERS:
+                        val = ws.cell(row=row_idx, column=ci).value
+                        key = f'ton_{k}_int_{tt}_{pack_key}'
+                        if val is not None:
+                            updated_keys[key] = _f(val)
+                        ci += 3
                     val = ws.cell(row=row_idx, column=ci).value
-                    key = f'ton_{k}_int_{tt}'
+                    key = f'ton_{k}_ext_50999_{pack_key}'
                     if val is not None:
                         updated_keys[key] = _f(val)
-                    ci += 3
-                val = ws.cell(row=row_idx, column=ci).value
-                key = f'ton_{k}_ext_50999'
-                if val is not None:
-                    updated_keys[key] = _f(val)
-            else:
-                for tt in TON_TIERS:
+                else:
+                    for tt in TON_TIERS:
+                        for lt in TIERS:
+                            val = ws.cell(row=row_idx, column=ci).value
+                            key = f'ton_{k}_int_{lt}_{tt}_{pack_key}'
+                            if val is not None:
+                                updated_keys[key] = _f(val)
+                            ci += 1
                     for lt in TIERS:
                         val = ws.cell(row=row_idx, column=ci).value
-                        key = f'ton_{k}_int_{lt}_{tt}'
+                        key = f'ton_{k}_ext_{lt}_50999_{pack_key}'
                         if val is not None:
                             updated_keys[key] = _f(val)
                         ci += 1
-                for lt in TIERS:
-                    val = ws.cell(row=row_idx, column=ci).value
-                    key = f'ton_{k}_ext_{lt}_50999'
-                    if val is not None:
-                        updated_keys[key] = _f(val)
-                    ci += 1
 
         if updated_keys:
             _ensure_settings(conn, list(updated_keys.keys()))

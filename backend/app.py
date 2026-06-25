@@ -18,11 +18,14 @@ from backend.api import register_blueprints
 from backend.config.settings import (
     FRONTEND_DIR, IMAGE_PATH, OUTPUT_FOLDER, UPLOAD_FOLDER, configure_app,
     INQUIRY_IMAP_USER, INQUIRY_CHECK_INTERVAL_MINUTES,
+    INQUIRY_REMINDER_INTERVAL,
 )
 
 
 def create_app():
     app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path='/frontend')
+    app.url_map.strict_slashes = False
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
     CORS(app, supports_credentials=True, expose_headers=['Content-Disposition'])
     configure_app(app)
     register_blueprints(app)
@@ -54,6 +57,8 @@ def create_app():
         }), 403
 
     _start_email_watcher()
+    _start_schedule_scheduler()
+    _start_inquiry_reminder()
 
     return app
 
@@ -134,6 +139,48 @@ def _start_email_watcher():
 
 def get_email_scheduler():
     return _email_scheduler
+
+
+def _start_schedule_scheduler():
+    try:
+        from backend.services import schedule_service
+        schedule_service.start_scheduler()
+    except Exception as exc:
+        print(f'[SCHEDULE] 调度器启动失败: {exc}')
+
+
+_inquiry_reminder_scheduler = None
+
+
+def _start_inquiry_reminder():
+    global _inquiry_reminder_scheduler
+    if _inquiry_reminder_scheduler is not None:
+        return
+    if not INQUIRY_REMINDER_INTERVAL or INQUIRY_REMINDER_INTERVAL <= 0:
+        print('[INQUIRY-REMINDER] 定时提醒未启用 (KS_INQUIRY_REMINDER_INTERVAL=0)')
+        return
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from backend.services.inquiry_service import send_pending_inquiry_reminder
+
+        _inquiry_reminder_scheduler = BackgroundScheduler(daemon=True)
+        _inquiry_reminder_scheduler.add_job(
+            send_pending_inquiry_reminder,
+            'interval',
+            minutes=INQUIRY_REMINDER_INTERVAL,
+            id='inquiry_pending_reminder',
+            misfire_grace_time=600,
+            max_instances=1,
+            coalesce=True,
+        )
+        _inquiry_reminder_scheduler.start()
+        print(f'[INQUIRY-REMINDER] 定时提醒已启动, 间隔={INQUIRY_REMINDER_INTERVAL}分钟')
+    except Exception as exc:
+        print(f'[INQUIRY-REMINDER] 调度器启动失败: {exc}')
+
+
+def get_inquiry_reminder_scheduler():
+    return _inquiry_reminder_scheduler
 
 
 _INTERVAL_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'poll_interval.txt')

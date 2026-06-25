@@ -1,6 +1,7 @@
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.worksheet.page import PageMargins
+from backend.core.print_settings import apply_print_setup
 from openpyxl.drawing.image import Image as XlImage
 from openpyxl.utils import get_column_letter
 import os
@@ -10,8 +11,8 @@ from decimal import Decimal
 import math
 
 from backend.core.shared.text_utils import _CJK_RE, _strip_cjk_spec, normalize_lookup_code
-from backend.core.shared.price_utils import resolve_price_info, has_valid_price_info, round_to_2_decimal
-from backend.core.shared.product_utils import _is_valid_product_code
+from backend.core.shared.price_utils import resolve_price_info, has_valid_price_info, round_to_2_decimal, get_temp_adjusted_base_price, get_temp_base_price, apply_temp_preinstall_adjustment
+from backend.core.shared.product_utils import _is_valid_product_code, normalize_preinstall
 from backend.core.shared.weight_utils import extract_length_from_spec
 from backend.core.material_translate import translate_material
 
@@ -337,7 +338,7 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
             pile_products_info.append({'code': product_code, 'row': row, 'quantity': quantity})
 
         if price_info and has_valid_price_info(price_info):
-            unit_price = float(price_info['price'])
+            unit_price = get_temp_base_price(price_info, product, group or '日语组', 'export')
             price_unit = price_info.get('unit', '')
             matched_count += 1
             is_matched = True
@@ -350,6 +351,8 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
                     'spec': product.get('spec', ''),
                     'material': raw_material,
                     'quantity': quantity * _detail_table_qty,
+                    'weight': product.get('weight', 0),
+                    'preinstall': normalize_preinstall(product.get('preinstall')),
                 })
         is_meter = price_unit in ['米', 'm', 'M', 'meter', 'Meter', 'METERS', 'meters']
         length_mm = Decimal('0')
@@ -360,6 +363,8 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
             display_unit_price = float(Decimal(str(unit_price)) * length_mm / Decimal('1000'))
         else:
             display_unit_price = unit_price
+
+        display_unit_price = apply_temp_preinstall_adjustment(price_info, display_unit_price, product, group or '日语组', 'export')
 
         if is_pile:
             display_unit_price = 0
@@ -527,12 +532,7 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
 
     _apply_outer_border(ws, 1, sub_row, 1, max_col)
 
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.75, bottom=0.75, left=0.7, right=0.7, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'ja_EST')
 
     return {
         'sheet_name': sheet_name,
@@ -1820,11 +1820,6 @@ def create_summary_sheet(workbook, detail_results, matrix_data=None,
         idx = sheet_names.index('合計')
         workbook.move_sheet('合計', offset=-idx)
 
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.75, bottom=0.75, left=0.7, right=0.7, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'ja_EST')
 
     return ws.title

@@ -179,7 +179,7 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
     snow_load = matrix_data.get('max_snow_load') or ''
     angle = matrix_data.get('angle') or ''
     ground_height = nv_params.get('ground_height') or matrix_data.get('ground_height') or ''
-    span_ew = nv_params.get('span_ew') or 2700
+    span_ew = nv_params.get('span_ew') or ''
     sales_name = nv_params.get('sales_name') or 'Nanami'
     sales_phone = nv_params.get('sales_phone') or '+86-137-7466-5835'
     sales_fax = nv_params.get('sales_fax') or '0086-592-5738212'
@@ -221,7 +221,7 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
     _set(ws, 4, 4, '垂直積雪量')
     _set(ws, 4, 5, snow_load)
     _set(ws, 4, 6, '発電量(W)/基')
-    if module_wattage and rows_val and cols_val and span_ew:
+    if module_wattage and rows_val and cols_val:
         panel_per_set = int(rows_val) * int(cols_val) if rows_val and cols_val else 0
         _set(ws, 4, 7, f'=G3*({panel_per_set}-G6)')
     else:

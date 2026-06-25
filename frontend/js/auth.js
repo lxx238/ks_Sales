@@ -28,7 +28,8 @@ function isLoginPage() {
 function getPermissionFirstPage(auth) {
     if (!auth) return 'quotation';
     if (auth.role === 'admin') return 'quotation';
-    const permPageMap = ['quotation', 'cad', 'database', 'records', 'questions', 'logistics'];
+    if (auth.group === '设计组') return 'email-mgmt';
+    const permPageMap = ['quotation', 'cad', 'database', 'records', 'questions', 'logistics', 'schedule'];
     const perms = auth.permissions || [];
     for (const perm of permPageMap) {
         if (perms.includes(perm)) return perm;
@@ -136,6 +137,9 @@ async function syncCurrentAuth(options = {}) {
             : await fetchAuthMeDirect();
         if (!account) {
             throw new Error('未获取到当前登录信息');
+        }
+        if (account.group === '设计组' && !(account.roleLabel || '').trim()) {
+            account.roleLabel = '设计组';
         }
         setAuth(account);
         window._ksAuth = account;

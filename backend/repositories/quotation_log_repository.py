@@ -263,6 +263,166 @@ def get_group_stats(start=None, end=None, exclude_usernames=None):
         conn.close()
 
 
+def get_group_weekly_ranking(weeks=4, exclude_usernames=None):
+    ensure_quotation_log_schema()
+    conn = _get_conn()
+    try:
+        now = datetime.now()
+        current_monday = (now - timedelta(days=now.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        week_starts = []
+        for i in range(weeks - 1, -1, -1):
+            week_starts.append(current_monday - timedelta(weeks=i))
+        range_start_str = _ts(week_starts[0])
+
+        excl_sql = ''
+        excl_params = []
+        if exclude_usernames:
+            placeholders = ','.join(['?'] * len(exclude_usernames))
+            excl_sql = f" AND username NOT IN ({placeholders})"
+            excl_params = list(exclude_usernames)
+
+        rows = conn.execute(
+            f"""SELECT group_name, strftime('%Y-%m-%d', created_at) as day, COUNT(*) as cnt
+                FROM {TABLE}
+                WHERE status = 'success' AND created_at >= ?{excl_sql}
+                GROUP BY group_name, day""",
+            (range_start_str,) + tuple(excl_params),
+        ).fetchall()
+
+        week_labels = []
+        week_date_ranges = []
+        for ws in week_starts:
+            we = ws + timedelta(days=6)
+            week_labels.append(f'{ws.month}/{ws.day}-{we.month}/{we.day}')
+            week_date_ranges.append((ws, we))
+
+        group_weekly = {}
+        for r in rows:
+            g = r['group_name'] or '未知'
+            day_str = r['day']
+            if not day_str:
+                continue
+            try:
+                d = datetime.strptime(day_str, '%Y-%m-%d')
+            except Exception:
+                continue
+            for idx, (ws, we) in enumerate(week_date_ranges):
+                if ws <= d <= we:
+                    group_weekly.setdefault(g, [0] * weeks)
+                    group_weekly[g][idx] += r['cnt']
+                    break
+
+        known_groups = ['韩语组', '日语组', '英语组', '亚太组']
+        for g in known_groups:
+            if g not in group_weekly:
+                group_weekly[g] = [0] * weeks
+
+        result_rows = []
+        for g, counts in group_weekly.items():
+            result_rows.append({
+                'group_name': g,
+                'weekly': counts,
+                'total': sum(counts),
+            })
+        result_rows.sort(key=lambda x: x['total'], reverse=True)
+        for rank, rr in enumerate(result_rows, 1):
+            rr['rank'] = rank
+
+        # per-week ranking (groups ranked within each week)
+        weekly_ranking = []
+        for idx in range(weeks):
+            week_entries = sorted(
+                [{'group_name': g, 'count': counts[idx]} for g, counts in group_weekly.items()],
+                key=lambda x: x['count'], reverse=True,
+            )
+            weekly_ranking.append(week_entries)
+
+        return {
+            'week_labels': week_labels,
+            'rows': result_rows,
+            'weekly_ranking': weekly_ranking,
+        }
+    finally:
+        conn.close()
+
+
+def get_case_type_weekly_ranking(group_name, weeks=4, exclude_usernames=None):
+    ensure_quotation_log_schema()
+    conn = _get_conn()
+    try:
+        now = datetime.now()
+        current_monday = (now - timedelta(days=now.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        week_starts = []
+        for i in range(weeks - 1, -1, -1):
+            week_starts.append(current_monday - timedelta(weeks=i))
+        range_start_str = _ts(week_starts[0])
+
+        excl_sql = ''
+        excl_params = []
+        if exclude_usernames:
+            placeholders = ','.join(['?'] * len(exclude_usernames))
+            excl_sql = f" AND username NOT IN ({placeholders})"
+            excl_params = list(exclude_usernames)
+
+        group_sql = ''
+        group_params = []
+        if group_name:
+            group_sql = " AND group_name = ?"
+            group_params = [group_name]
+
+        rows = conn.execute(
+            f"""SELECT case_type, strftime('%Y-%m-%d', created_at) as day, COUNT(*) as cnt
+                FROM {TABLE}
+                WHERE status = 'success' AND created_at >= ?{group_sql}{excl_sql}
+                GROUP BY case_type, day""",
+            (range_start_str,) + tuple(group_params) + tuple(excl_params),
+        ).fetchall()
+
+        week_labels = []
+        week_date_ranges = []
+        for ws in week_starts:
+            we = ws + timedelta(days=6)
+            week_labels.append(f'{ws.month}/{ws.day}-{we.month}/{we.day}')
+            week_date_ranges.append((ws, we))
+
+        type_weekly = {}
+        for r in rows:
+            ct = (r['case_type'] or '').strip() or '其他'
+            day_str = r['day']
+            if not day_str:
+                continue
+            try:
+                d = datetime.strptime(day_str, '%Y-%m-%d')
+            except Exception:
+                continue
+            for idx, (ws, we) in enumerate(week_date_ranges):
+                if ws <= d <= we:
+                    type_weekly.setdefault(ct, [0] * weeks)
+                    type_weekly[ct][idx] += r['cnt']
+                    break
+
+        result_rows = []
+        for ct, counts in type_weekly.items():
+            result_rows.append({
+                'case_type': ct,
+                'weekly': counts,
+                'total': sum(counts),
+            })
+        result_rows.sort(key=lambda x: x['total'], reverse=True)
+        for rank, rr in enumerate(result_rows, 1):
+            rr['rank'] = rank
+
+        return {
+            'group_name': group_name or '全部',
+            'week_labels': week_labels,
+            'rows': result_rows,
+        }
+    finally:
+        conn.close()
+
+
 def get_trend(granularity='day', start=None, end=None, exclude_usernames=None):
     ensure_quotation_log_schema()
     conn = _get_conn()

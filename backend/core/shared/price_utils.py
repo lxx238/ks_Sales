@@ -186,3 +186,70 @@ def round_to_2_decimal(value):
     elif not isinstance(value, Decimal):
         return value
     return value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+def _temp_preinstall_value(product):
+    """内联预装归一化（避免与 product_utils 循环导入）。"""
+    text = str((product or {}).get('preinstall') or '').strip()
+    if '不预装' in text or '非预装' in text:
+        return '非预装'
+    return '预装'
+
+
+def _temp_pricing_currency(group, sale_type='export'):
+    """当前报价使用的计价币种：domestic→人民币(不套公式)，其余→美元/欧元。"""
+    if sale_type == 'domestic':
+        return 'rmb'
+    if group == '英语组' and sale_type == 'euro':
+        return 'eur'
+    return 'usd'
+
+
+def get_temp_base_price(price_info, product, group='韩语组', sale_type='export'):
+    """临时询价/常规来源的原始基础单价(长度折算前，不含预装调整)。
+
+    米计价物料应使用本函数取原始米长单价，先按长度折算为件价，
+    再用 apply_temp_preinstall_adjustment 施加预装(+1/×1.1)。
+    """
+    if not price_info:
+        return 0.0
+    base = price_info.get('price')
+    if base is None:
+        return 0.0
+    try:
+        return float(base)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def apply_temp_preinstall_adjustment(price_info, folded_price, product, group='韩语组', sale_type='export'):
+    """对「长度折算后」的件级单价施加预装调整。
+
+    规则（仅临时询价来源 + USD/EUR 时生效，其余原值返回）：
+      预装   = 件价 + 1
+      非预装 = 件价 × 1.1
+    注意：+1 必须在长度折算之后施加，即「米长单价×米长 + 1」，
+    而非「(米长单价+1)×米长」。
+    """
+    if not price_info or not price_info.get('temp_inquiry'):
+        return folded_price
+    if _temp_pricing_currency(group, sale_type) in ('rmb', 'rmb_fx'):
+        return folded_price
+    try:
+        base = float(folded_price)
+    except (TypeError, ValueError):
+        return folded_price
+    if _temp_preinstall_value(product) == '非预装':
+        return round(base * 1.1, 6)
+    return round(base + 1, 6)
+
+
+def get_temp_adjusted_base_price(price_info, product, group='韩语组', sale_type='export'):
+    """件计价物料直接使用的「已调整」基础单价(件级，无长度折算)。
+
+    等价于 get_temp_base_price + apply_temp_preinstall_adjustment；
+    仅适用于不按长度折算的件计价场景（如配件、外购件）。
+    米计价场景请改用 get_temp_base_price → 折长 → apply_temp_preinstall_adjustment。
+    """
+    base = get_temp_base_price(price_info, product, group, sale_type)
+    return apply_temp_preinstall_adjustment(price_info, base, product, group, sale_type)

@@ -14,10 +14,10 @@ from backend.core.shared.bom_utils import (
 )
 from backend.core.shared.image_utils import scan_images, find_latest_image_log, load_image_mapping_from_log
 from backend.core.shared.product_utils import _match_exclude_group
-from backend.core.shared.price_utils import resolve_price_info, has_valid_price_info
+from backend.core.shared.price_utils import resolve_price_info, has_valid_price_info, get_temp_adjusted_base_price
 from backend.core.inquiry_builder import create_inquiry_sheet
 from backend.core.shared.bom_zip_parser import _build_products_by_key
-from backend.core.shared.product_utils import _split_pile_products, _is_valid_product_code
+from backend.core.shared.product_utils import _split_pile_products, _is_valid_product_code, normalize_preinstall
 from backend.core.shared.weight_utils import extract_length_from_spec
 from backend.core.array_matcher import (
     find_matching_matrix_array,
@@ -32,6 +32,7 @@ from backend.core.ja_nv.quotation_engine import (
     create_nv_summary_sheet,
     create_spare_parts_sheet,
 )
+from backend.services.translate_service import translate_notes_in_details
 
 
 def split_and_create_quotations(
@@ -138,12 +139,17 @@ def split_and_create_quotations(
         _all_merged = {}
         _all_merged.update(_delete_merged)
         _all_merged.update(_spare_merged)
+        print(f'[DEBUG_CAP] exclude_delete_options={exclude_delete_options} exclude_options={exclude_options}')
+        _dg_in_input = [p for p in products if str(p.get('code', '') or '').strip().upper().startswith('DG-')]
+        print(f'[DEBUG_CAP] DG- products in this BOM: {len(_dg_in_input)} -> {[(p.get("code"), p.get("quantity")) for p in _dg_in_input]}')
         if not _all_merged or not any(_all_merged.values()):
+            print(f'[DEBUG_CAP] no exclude options active -> all products pass (cap will NOT be deleted here)')
             return products, []
         filtered = []
         excluded = []
         for p in products:
             if _match_exclude_group(p, price_mapping, _delete_merged, prefix_only=True):
+                print(f'[DEBUG_CAP] DELETED by delete_option: {p.get("code")}')
                 continue
             elif _match_exclude_group(p, price_mapping, _spare_merged, prefix_only=True):
                 excluded.append(p)
@@ -786,6 +792,9 @@ def split_and_create_quotations(
     if all_detail_results and matrix_array_entries:
         reorder_sheets_by_matrix_array(master_wb, all_detail_results, matrix_array_entries, log_prefix='[NV]')
 
+    translate_notes_in_details(all_detail_results)
+    translate_notes_in_details(inverter_detail_results)
+
     if all_detail_results:
         pile_summary = None
         if pile_products_all:
@@ -810,7 +819,7 @@ def split_and_create_quotations(
                                     _pp_pi = _val
                                     print(f"   🔧 builder杭フォールバック: {_pp_code} → {_key}")
                                     break
-                    _pp_price = float(_pp_pi.get('price', 0)) if _pp_pi and _pp_pi.get('price') else 0
+                    _pp_price = get_temp_adjusted_base_price(_pp_pi, _pp, group or '日语组', 'export') if _pp_pi and _pp_pi.get('price') else 0
                     _pp_unit = (_pp_pi.get('unit', '') if _pp_pi else '') or ''
                     if _pp_price == 0 and _pp_qty > 0 and _is_valid_product_code(_pp_code):
                         all_unmatched_products.append({
@@ -819,6 +828,8 @@ def split_and_create_quotations(
                             'spec': _pp.get('spec', ''),
                             'material': _pp.get('material', ''),
                             'quantity': _pp_qty,
+                            'weight': _pp.get('weight', 0),
+                            'preinstall': normalize_preinstall(_pp.get('preinstall')),
                         })
                         print(f"   ⚠ 杭価格未検出（询价追加）: code={_pp_code}, spec={_pp.get('spec', '')}")
                     if _pp_unit in ('米', 'm', 'M', 'meter'):

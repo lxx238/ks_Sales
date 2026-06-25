@@ -15,7 +15,7 @@ from backend.core.shared.bom_utils import (
     read_bom_from_dataframe, extract_sheet_names_from_keys, build_bom_selection_key,
 )
 from backend.core.shared.image_utils import scan_images, find_latest_image_log, load_image_mapping_from_log
-from backend.core.shared.price_utils import resolve_price_info, round_to_2_decimal
+from backend.core.shared.price_utils import resolve_price_info, round_to_2_decimal, get_temp_adjusted_base_price
 from backend.core.shared.text_utils import normalize_lookup_code
 from backend.core.shared.product_utils import _is_valid_product_code, _match_exclude_group
 from backend.core.shared.sheet_utils import reorder_sheets_by_matrix_array, set_page_break_preview
@@ -33,6 +33,7 @@ from backend.core.ja_EST.quotation_engine import (
     create_summary_sheet,
     create_ja_inquiry_sheet,
 )
+from backend.services.translate_service import translate_notes_in_details
 
 
 def _col_letters_to_idx(letters):
@@ -192,12 +193,36 @@ def _find_config_zip(parsed_rows, bom_row, max_row, search_end=None):
             if val is not None and '是' in str(val):
                 config['variant'] = '可调'
 
+        if not config['cross_span'] and '导轨伸出面板长度' in row_str:
+            sorted_cols = sorted(cells.keys())
+            anchor_col = None
+            for col_idx in sorted_cols:
+                if '导轨伸出面板长度' in str(cells[col_idx]):
+                    anchor_col = col_idx
+                    break
+            if anchor_col is not None:
+                for col_idx in sorted_cols:
+                    if col_idx <= anchor_col:
+                        continue
+                    val = str(cells[col_idx]).strip()
+                    if any(stop in val for stop in ['单基侧压总数', '阵列基数', '标准定价', '切法辅助']):
+                        break
+                    m = re.search(r'(\d+(?:\.\d+)?)', val)
+                    if not m:
+                        continue
+                    num = float(m.group(1))
+                    if 500 <= num <= 20000:
+                        config['cross_span'] = m.group(1).rstrip('0').rstrip('.') if '.' in m.group(1) else m.group(1)
+                        break
+
         if not config['cross_span'] and '跨距' in row_str:
             _, val = _find_label_value(cells, '跨距')
             if val is not None:
                 m = re.search(r'(\d+(?:\.\d+)?)', str(val))
                 if m:
-                    config['cross_span'] = m.group(1)
+                    num = float(m.group(1))
+                    if 500 <= num <= 20000:
+                        config['cross_span'] = m.group(1).rstrip('0').rstrip('.') if '.' in m.group(1) else m.group(1)
     return config
 
 
@@ -1394,7 +1419,7 @@ def split_and_create_quotations(
                         _pp_qty = float(_pp.get('quantity', 0))
                         _pp_code = str(_pp.get('code', '') or '').strip()
                         _pp_pi = resolve_price_info(price_mapping, _pp_code, spec=_pp.get('spec', '')) if price_mapping else None
-                        _pp_price = float(_pp_pi.get('price', 0)) if _pp_pi and _pp_pi.get('price') else 0
+                        _pp_price = get_temp_adjusted_base_price(_pp_pi, _pp, group or '日语组', 'export') if _pp_pi and _pp_pi.get('price') else 0
                         _pp_unit = (_pp_pi.get('unit', '') if _pp_pi else '') or ''
                         if _pp_unit in ('米', 'm', 'M', 'meter'):
                             _m = _re.search(r'(\d+\.?\d*)', _pp.get('spec', ''))
@@ -1465,6 +1490,8 @@ def split_and_create_quotations(
             inquiry_file = None
 
     if all_detail_results:
+        translate_notes_in_details(all_detail_results)
+        translate_notes_in_details(inverter_detail_results)
         try:
             fence_material_map = {}
             fence_surface_for_prefix = ''

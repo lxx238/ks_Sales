@@ -16,14 +16,15 @@ from backend.core.shared.bom_utils import (
     read_bom_from_dataframe,
 )
 from backend.core.shared.image_utils import scan_images, find_latest_image_log, load_image_mapping_from_log
-from backend.core.shared.price_utils import resolve_price_info, has_valid_price_info, round_to_2_decimal
+from backend.core.shared.price_utils import resolve_price_info, has_valid_price_info, round_to_2_decimal, get_temp_adjusted_base_price
 from backend.core.shared.product_utils import _match_exclude_group
 from backend.core.inquiry_builder import create_inquiry_sheet
 from backend.core.shared.bom_zip_parser import _build_products_by_key
-from backend.core.shared.product_utils import _split_pile_products
-from backend.core.ja_nv.quotation_engine import create_nv_detail_sheet
+from backend.core.shared.product_utils import _split_pile_products, normalize_preinstall
+from backend.core.ja_normal.detail_sheet import create_normal_detail_sheet
 from backend.core.ja_normal.quotation_engine import create_normal_summary_sheet
 from backend.core.shared.sheet_utils import reorder_sheets_by_matrix_array, set_page_break_preview
+from backend.services.translate_service import translate_notes_in_details
 
 
 def split_and_create_quotations(
@@ -53,6 +54,7 @@ def split_and_create_quotations(
         consumption_tax=None,
         fence_tax=None,
         discount_rate=None,
+        exchange_rate=None,
         truck_desc=None,
         truck_fee=None,
         need_total_qty=False,
@@ -205,7 +207,7 @@ def split_and_create_quotations(
                 detail_sheet_products.append(_pp_copy)
 
         try:
-            detail = create_nv_detail_sheet(
+            detail = create_normal_detail_sheet(
                 master_wb,
                 matched_array,
                 all_prods,
@@ -252,7 +254,7 @@ def split_and_create_quotations(
         if ws_first:
             from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
             inv_start = ws_first.max_row + 1
-            sm_font = Font(name='Yu Gothic UI', size=8)
+            sm_font = Font(name='微软雅黑', size=12)
             center_a = Alignment(horizontal='center', vertical='center', wrap_text=True)
             thin_b = Border(
                 left=Side(style='thin'), right=Side(style='thin'),
@@ -271,7 +273,7 @@ def split_and_create_quotations(
                 inv_is_matched = False
                 unit_price = 0
                 if pi and has_valid_price_info(pi):
-                    unit_price = float(pi['price'])
+                    unit_price = get_temp_adjusted_base_price(pi, ip, group or '日语组', 'export')
                     inv_is_matched = True
                 else:
                     if qty > 0:
@@ -281,6 +283,8 @@ def split_and_create_quotations(
                             'spec': ip.get('spec', ''),
                             'material': (pi.get('db_material') if pi and pi.get('db_material') else None) or ip.get('material', ''),
                             'quantity': qty,
+                            'weight': ip.get('weight', 0),
+                            'preinstall': normalize_preinstall(ip.get('preinstall')),
                         })
                 total_price = unit_price * qty if unit_price > 0 else 0
                 ws_first.cell(row=row, column=1, value=row - inv_start + 1).font = sm_font
@@ -309,7 +313,7 @@ def split_and_create_quotations(
                 else:
                     ws_first.cell(row=row, column=8, value='').font = sm_font
                     ws_first.cell(row=row, column=8).alignment = center_a
-                ws_first.row_dimensions[row].height = 60
+                ws_first.row_dimensions[row].height = 30
                 for c in range(1, 9):
                     ws_first.cell(row=row, column=c).border = thin_b
                 if not inv_is_matched:
@@ -319,6 +323,8 @@ def split_and_create_quotations(
 
     if all_detail_results and arrays:
         reorder_sheets_by_matrix_array(master_wb, all_detail_results, arrays, log_prefix='[NORMAL-JA]')
+
+    translate_notes_in_details(all_detail_results)
 
     if all_detail_results:
         pile_summary = None
@@ -336,7 +342,7 @@ def split_and_create_quotations(
                     _pp_qty = float(_pp.get('quantity', 0))
                     _pp_code = str(_pp.get('code', '') or '').strip()
                     _pp_pi = resolve_price_info(price_mapping, _pp_code, spec=_pp.get('spec', '')) if price_mapping else None
-                    _pp_price = float(_pp_pi.get('price', 0)) if _pp_pi and _pp_pi.get('price') else 0
+                    _pp_price = get_temp_adjusted_base_price(_pp_pi, _pp, group or '日语组', 'export') if _pp_pi and _pp_pi.get('price') else 0
                     _pp_unit = (_pp_pi.get('unit', '') if _pp_pi else '') or ''
                     if _pp_unit in ('米', 'm', 'M', 'meter'):
                         _len = float(_pp.get('length', 0) or 0)
@@ -349,18 +355,27 @@ def split_and_create_quotations(
                     _pa += _pp_price * _pp_qty
                 pile_summary = {'total_qty': _pq, 'total_price': round(_pa, 2)}
         try:
-            create_normal_summary_sheet(
-                master_wb,
-                all_detail_results,
-                matrix_data=matrix_data,
-                image_path=image_path,
-                fence_data=fence_data,
-                normal_params=normal_params,
-                nv_fence_gate_data=nv_fence_gate_data,
-                pile_summary=pile_summary,
-                image_temp_dir=image_temp_dir,
-                image_cache=image_cache,
-            )
+            _mc = normal_params.get('mitsumori_condition', '')
+            if _mc == 'TEST':
+                _modes = [('CIF', 'CIF'), ('DDP', 'DDP'), ('CIF_DDP', 'CIF+DDP')]
+            else:
+                _modes = [(_mc, None)]
+            for _mode, _title in _modes:
+                _np = dict(normal_params)
+                _np['mitsumori_condition'] = _mode
+                create_normal_summary_sheet(
+                    master_wb,
+                    all_detail_results,
+                    matrix_data=matrix_data,
+                    image_path=image_path,
+                    fence_data=fence_data,
+                    normal_params=_np,
+                    nv_fence_gate_data=nv_fence_gate_data,
+                    pile_summary=pile_summary,
+                    image_temp_dir=image_temp_dir,
+                    image_cache=image_cache,
+                    sheet_title=_title,
+                )
         except Exception as e:
             import traceback
             print(f"   ❌ 普通案件合計シート生成失敗: {e}")

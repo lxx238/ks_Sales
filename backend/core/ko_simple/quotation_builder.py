@@ -23,7 +23,7 @@ from backend.core.shared.text_utils import (
     extract_main_name,
     normalize_lookup_code,
 )
-from backend.core.shared.price_utils import resolve_price_info
+from backend.core.shared.price_utils import resolve_price_info, has_valid_price_info, get_temp_adjusted_base_price
 from backend.core.shared.sheet_utils import reorder_sheets_by_matrix_array, set_page_break_preview
 from backend.core.quotation_engine import create_inquiry_sheet
 from backend.core.array_matcher import (
@@ -38,6 +38,7 @@ from backend.core.ko_simple.quotation_engine import (
     create_ksd_detail_sheet,
     create_ksd_summary_sheet,
 )
+from backend.core.en_common.quotation_engine import create_total_materials_sheet
 
 
 def split_and_create_quotations(
@@ -73,6 +74,7 @@ def split_and_create_quotations(
         always_exclude_extra_items=False,
         ko_exclude_options=None,
         pre_parsed_bom_data=None,
+        need_total_materials=False,
         **kwargs
 ):
     if output_dir is None:
@@ -797,10 +799,10 @@ def split_and_create_quotations(
         for _pp in pile_products_all:
             _pp_qty = float(_pp.get('quantity', 0))
             _pp_code = _pp.get('code', '')
-            from backend.core.shared.price_utils import resolve_price_info, has_valid_price_info
+            from backend.core.shared.price_utils import resolve_price_info, has_valid_price_info, get_temp_adjusted_base_price
             from backend.core.shared.weight_utils import extract_length_from_spec
             _pp_pi = resolve_price_info(price_mapping, _pp_code, spec=_pp.get('spec', '')) if price_mapping else None
-            _pp_price = float(_pp_pi.get('price', 0)) if _pp_pi and has_valid_price_info(_pp_pi) else 0
+            _pp_price = get_temp_adjusted_base_price(_pp_pi, _pp, '韩语组', sale_type) if _pp_pi and has_valid_price_info(_pp_pi) else 0
             _pp_unit = (_pp_pi.get('unit', '') if _pp_pi else '') or ''
             if _pp_unit in ('米', 'm', 'M', 'meter'):
                 _len = extract_length_from_spec(_pp.get('spec', '')) or 0
@@ -838,6 +840,29 @@ def split_and_create_quotations(
         except Exception as e:
             import traceback
             print(f"   ❌ SIMPLE summary failed: {e}")
+            traceback.print_exc()
+
+    if need_total_materials and all_quotation_results:
+        try:
+            create_total_materials_sheet(
+                master_wb,
+                all_quotation_results,
+                price_mapping=price_mapping,
+                sale_type=sale_type,
+                coating_thickness=coating_thickness,
+                lang='en',
+                need_weight_code=need_weight_code,
+                need_total_qty=need_total_qty,
+                discount_method='project',
+                ko_discount_rate=ko_discount_rate,
+                ko_steel_discount_rate=ko_steel_discount_rate,
+                ko_purchased_discount_rate=ko_purchased_discount_rate,
+                pile_products=pile_products_all,
+                show_code=True,
+            )
+        except Exception as e:
+            import traceback
+            print(f"   ❌ SIMPLE total materials sheet failed: {e}")
             traceback.print_exc()
 
     if all_quotation_results:

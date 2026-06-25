@@ -8,6 +8,8 @@ from backend.repositories.quotation_log_repository import (
     get_overview_stats,
     get_user_stats,
     get_group_stats,
+    get_group_weekly_ranking,
+    get_case_type_weekly_ranking,
     get_trend,
     query_logs,
     get_user_detail,
@@ -52,6 +54,25 @@ def by_group_route():
     start = request.args.get('start')
     end = request.args.get('end')
     return jsonify({'success': True, 'data': get_group_stats(start=start, end=end, exclude_usernames=_get_admin_usernames())})
+
+
+@usage_bp.get('/group-weekly')
+def group_weekly_route():
+    ensure_admin_account()
+    weeks = request.args.get('weeks', 4, type=int)
+    if weeks < 1 or weeks > 24:
+        weeks = 4
+    return jsonify({'success': True, 'data': get_group_weekly_ranking(weeks=weeks, exclude_usernames=_get_admin_usernames())})
+
+
+@usage_bp.get('/case-type-weekly')
+def case_type_weekly_route():
+    ensure_admin_account()
+    group_name = request.args.get('group') or ''
+    weeks = request.args.get('weeks', 4, type=int)
+    if weeks < 1 or weeks > 24:
+        weeks = 4
+    return jsonify({'success': True, 'data': get_case_type_weekly_ranking(group_name=group_name, weeks=weeks, exclude_usernames=_get_admin_usernames())})
 
 
 @usage_bp.get('/trend')
@@ -176,7 +197,7 @@ def export_route():
         g = log.get('group_name') or '未知'
         grouped.setdefault(g, []).append(log)
 
-    group_order = ['韩语组', '日语组', '英语组']
+    group_order = ['韩语组', '日语组', '英语组', '亚太组']
     other_groups = sorted(k for k in grouped if k not in group_order)
     ordered_groups = [g for g in group_order if g in grouped] + other_groups
 
@@ -248,5 +269,90 @@ def export_route():
     buf.seek(0)
 
     filename = '报价使用统计.xlsx'
+    return send_file(buf, as_attachment=True, download_name=filename,
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+@usage_bp.get('/export-details')
+def export_details_route():
+    ensure_admin_account()
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    start = request.args.get('start')
+    end = request.args.get('end')
+    username = request.args.get('username')
+    group_name = request.args.get('group')
+    status = request.args.get('status')
+
+    logs = query_all_logs(
+        start=start, end=end, username=username,
+        group_name=group_name, status=status,
+        exclude_usernames=_get_admin_usernames() if not username else None,
+    )
+    china_name_map = _build_china_name_map()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = '报价生成详细日志'
+
+    header_fill = PatternFill(start_color='2563EB', end_color='2563EB', fill_type='solid')
+    header_font_white = Font(bold=True, size=11, color='FFFFFF')
+    thin_border = Border(
+        left=Side(style='thin', color='E2E8F0'),
+        right=Side(style='thin', color='E2E8F0'),
+        top=Side(style='thin', color='E2E8F0'),
+        bottom=Side(style='thin', color='E2E8F0'),
+    )
+
+    headers = ['序号', '时间', '用户名', '中文名称', '语言组', '项目名称', 'BOM文件',
+               '业务类型', '匹配(成功/总数)', 'Sheet数', '耗时(秒)', '状态', '错误信息']
+    ws.append(headers)
+    for col_idx, _ in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.font = header_font_white
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center')
+        cell.border = thin_border
+
+    for idx, log in enumerate(logs, 1):
+        match_str = ''
+        try:
+            ms = json.loads(log.get('match_stats') or '{}') if isinstance(log.get('match_stats'), str) else (log.get('match_stats') or {})
+            match_str = f"{ms.get('matched_count', 0)}/{ms.get('total_products', 0)}"
+        except Exception:
+            pass
+        dur_s = round((log.get('duration_ms') or 0) / 1000, 1)
+        status_cn = '成功' if log.get('status') == 'success' else '失败'
+        ws.append([
+            idx,
+            log.get('created_at', ''),
+            log.get('username', ''),
+            china_name_map.get(log.get('username', ''), ''),
+            log.get('group_name', ''),
+            log.get('project_name', ''),
+            log.get('bom_filename', ''),
+            log.get('case_type', ''),
+            match_str,
+            log.get('sheet_count', 0),
+            dur_s,
+            status_cn,
+            log.get('error_message', ''),
+        ])
+        for col_idx in range(1, len(headers) + 1):
+            cell = ws.cell(row=ws.max_row, column=col_idx)
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal='center')
+
+    col_widths = [6, 20, 14, 14, 10, 24, 22, 10, 14, 8, 10, 8, 30]
+    for col_idx, w in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = w
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    filename = '报价详细日志.xlsx'
     return send_file(buf, as_attachment=True, download_name=filename,
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

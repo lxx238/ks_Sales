@@ -7,6 +7,7 @@ from openpyxl.styles import Font, Alignment, Border, Side, PatternFill, numbers
 from openpyxl.utils import get_column_letter
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.worksheet.page import PageMargins
+from backend.core.print_settings import apply_print_setup
 
 from backend.core.shared.bom_utils import (
     read_bom_from_dataframe,
@@ -18,6 +19,8 @@ from backend.core.shared.price_utils import (
     has_valid_price_info,
     round_to_2_decimal,
     _get_discount_category,
+    get_temp_adjusted_base_price,
+    get_temp_base_price, apply_temp_preinstall_adjustment,
 )
 from backend.core.shared.weight_utils import (
     extract_length_from_spec,
@@ -33,6 +36,7 @@ from backend.core.shared.text_utils import (
 from backend.core.shared.product_utils import (
     _is_valid_product_code,
     _match_exclude_group,
+    normalize_preinstall,
 )
 from backend.core.shared.constants import (
     EXCLUDE_ITEM_GROUPS,
@@ -684,7 +688,7 @@ def create_ksd_detail_sheet(
             is_matched = False
 
             if price_info and has_valid_price_info(price_info):
-                unit_price = float(price_info['price'])
+                unit_price = get_temp_base_price(price_info, product, '韩语组', sale_type)
                 price_unit = price_info.get('unit', '')
                 matched_count += 1
                 is_matched = True
@@ -697,6 +701,8 @@ def create_ksd_detail_sheet(
                         'spec': product.get('spec', ''),
                         'quantity': product.get('quantity', 0),
                         'unit': price_info.get('unit', '') if price_info else '',
+                        'weight': product.get('weight', 0),
+                        'preinstall': normalize_preinstall(product.get('preinstall')),
                         'issue_reason': '数据库无法匹配',
                     })
 
@@ -708,15 +714,15 @@ def create_ksd_detail_sheet(
                 display_unit_price = float(Decimal(str(unit_price)) * length_mm / Decimal('1000'))
             else:
                 display_unit_price = unit_price
+            display_unit_price = apply_temp_preinstall_adjustment(price_info, display_unit_price, product, '韩语组', sale_type)
 
             if display_unit_price > 0:
                 _set_cell(ws, row, 6, float(display_unit_price),
                           font=normal_font, align=center_align, border=thin_border,
-                          number_format=currency_number_format)
+                          number_format='#,##0.00')
             else:
                 _set_cell(ws, row, 6, "",
-                          font=normal_font, align=center_align, border=thin_border,
-                          number_format=currency_number_format)
+                          font=normal_font, align=center_align, border=thin_border)
 
             quantity = product['quantity']
             if quantity > 0:
@@ -731,7 +737,7 @@ def create_ksd_detail_sheet(
                 total_price = Decimal(str(display_unit_price)) * Decimal(str(quantity))
                 _set_cell(ws, row, 8, f"=F{row}*G{row}",
                           font=normal_font, align=center_align, border=thin_border,
-                          number_format=currency_number_format)
+                          number_format='#,##0.00')
                 sub_total_price += total_price
                 cat = _get_discount_category(price_info)
                 if cat == 'standard':
@@ -749,7 +755,7 @@ def create_ksd_detail_sheet(
             else:
                 _set_cell(ws, row, 8, f"=F{row}*G{row}",
                           font=normal_font, align=center_align, border=thin_border,
-                          number_format=currency_number_format)
+                          number_format='#,##0.00')
                 if not is_matched:
                     unmatched_rows.append(row)
 
@@ -1046,12 +1052,7 @@ def create_ksd_detail_sheet(
 
     grand_total = part1_total_all + part2_total_all + part3_total_all
 
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.75, bottom=0.75, left=0.7, right=0.7, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'ko_ksd')
 
     if unmatched_products_list is not None:
         for _up in local_unmatched:
@@ -1101,6 +1102,7 @@ def create_ksd_detail_sheet(
         'image_found_count': image_found_count,
         'image_not_found_count': image_not_found_count,
         'pile_products': pile_products,
+        'all_render_products': all_render_products,
         'sub_total_row': last_data_row,
         'total_row': last_data_row,
         'detail_data_end_row': last_data_row,
@@ -1367,7 +1369,7 @@ def create_ksd_summary_sheet(
             r_kw = sum((d.get('matrix_data') or {}).get('output_kw', 0) or 0 for d in _group)
 
             _m_idx = _first.get('_matrix_idx')
-            _no_label = f"({_m_idx + 1})" if _m_idx is not None else str(_visible_row)
+            _no_label = str((_m_idx + 1) if _m_idx is not None else _visible_row)
 
             ws.cell(row=r, column=1, value=_no_label).alignment = center
             ws.cell(row=r, column=2, value=r_rows or '').alignment = center
@@ -1390,13 +1392,13 @@ def create_ksd_summary_sheet(
                 else:
                     _weighted_parts.append(str(float(_gd.get('part1_price_per_table', 0)) * _gd_base))
             if _weighted_parts:
-                ws.cell(row=r, column=10, value=f'=({"+".join(_weighted_parts)})/{_total_base}').number_format = ksd_currency_fmt
+                ws.cell(row=r, column=10, value=f'=({"+".join(_weighted_parts)})/{_total_base}').number_format = '#,##0.00'
             else:
-                ws.cell(row=r, column=10, value=0).number_format = ksd_currency_fmt
+                ws.cell(row=r, column=10, value=0).number_format = '#,##0.00'
             ws.cell(row=r, column=10).alignment = center
             ws.merge_cells(f'J{r}:K{r}')
 
-            ws.cell(row=r, column=12, value=f'=J{r}*F{r}').number_format = ksd_currency_fmt
+            ws.cell(row=r, column=12, value=f'=J{r}*F{r}').number_format = '#,##0.00'
             ws.cell(row=r, column=12).alignment = center
             ws.merge_cells(f'L{r}:M{r}')
 
@@ -1423,7 +1425,7 @@ def create_ksd_summary_sheet(
             p1_total_table_row = qr.get('part1_total_table_row', 0)
 
             _m_idx = qr.get('_matrix_idx')
-            _no_label = f"({_m_idx + 1})" if _m_idx is not None else str(_visible_row)
+            _no_label = str((_m_idx + 1) if _m_idx is not None else _visible_row)
 
             ws.cell(row=r, column=1, value=_no_label).alignment = center
             ws.cell(row=r, column=2, value=r_rows or '').alignment = center
@@ -1436,15 +1438,15 @@ def create_ksd_summary_sheet(
             ws.cell(row=r, column=8, value=r_kw).alignment = center
             ws.merge_cells(f'H{r}:I{r}')
             if detail_sheet and p1_total_table_row:
-                ws.cell(row=r, column=10, value=f"='{detail_sheet}'!H{p1_total_table_row}").number_format = ksd_currency_fmt
+                ws.cell(row=r, column=10, value=f"='{detail_sheet}'!H{p1_total_table_row}").number_format = '#,##0.00'
             else:
-                ws.cell(row=r, column=10, value=qr.get('part1_price_per_table', 0)).number_format = ksd_currency_fmt
+                ws.cell(row=r, column=10, value=qr.get('part1_price_per_table', 0)).number_format = '#,##0.00'
             ws.cell(row=r, column=10).alignment = center
             ws.merge_cells(f'J{r}:K{r}')
             if isinstance(r_set, int) and r_set > 1:
-                ws.cell(row=r, column=12, value=f'=J{r}*F{r}').number_format = ksd_currency_fmt
+                ws.cell(row=r, column=12, value=f'=J{r}*F{r}').number_format = '#,##0.00'
             else:
-                ws.cell(row=r, column=12, value=f'=J{r}').number_format = ksd_currency_fmt
+                ws.cell(row=r, column=12, value=f'=J{r}').number_format = '#,##0.00'
             ws.cell(row=r, column=12).alignment = center
             ws.merge_cells(f'L{r}:M{r}')
             for ci in range(1, 14):
@@ -1548,15 +1550,15 @@ def create_ksd_summary_sheet(
             ws.cell(row=r, column=8, value=r_kw).alignment = center
             ws.merge_cells(f'H{r}:I{r}')
             if detail_sheet and p2_total_table_row:
-                ws.cell(row=r, column=10, value=f"='{detail_sheet}'!H{p2_total_table_row}").number_format = ksd_currency_fmt
+                ws.cell(row=r, column=10, value=f"='{detail_sheet}'!H{p2_total_table_row}").number_format = '#,##0.00'
             else:
-                ws.cell(row=r, column=10, value=qr.get('part2_price_per_table', 0)).number_format = ksd_currency_fmt
+                ws.cell(row=r, column=10, value=qr.get('part2_price_per_table', 0)).number_format = '#,##0.00'
             ws.cell(row=r, column=10).alignment = center
             ws.merge_cells(f'J{r}:K{r}')
-        if isinstance(r_set, int) and r_set > 1:
-            ws.cell(row=r, column=12, value=f'=J{r}*F{r}').number_format = ksd_currency_fmt
-        else:
-            ws.cell(row=r, column=12, value=f'=J{r}').number_format = ksd_currency_fmt
+            if isinstance(r_set, int) and r_set > 1:
+                ws.cell(row=r, column=12, value=f'=J{r}*F{r}').number_format = '#,##0.00'
+            else:
+                ws.cell(row=r, column=12, value=f'=J{r}').number_format = '#,##0.00'
             ws.cell(row=r, column=12).alignment = center
             ws.merge_cells(f'L{r}:M{r}')
             for ci in range(1, 14):
@@ -1617,12 +1619,8 @@ def create_ksd_summary_sheet(
         name='Calibri', size=8, color='FF0000')
     ws.cell(row=hint_row, column=1).alignment = left_bottom
 
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.75, bottom=0.75, left=0.7, right=0.7, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'ko_ksd')
+    ws.sheet_view.zoomScale = 100
 
     sheet_names = workbook.sheetnames
     if 'Total' in sheet_names:

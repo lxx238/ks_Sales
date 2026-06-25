@@ -2,6 +2,7 @@
 from openpyxl.utils import get_column_letter
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.worksheet.page import PageMargins
+from backend.core.print_settings import apply_print_setup
 from decimal import Decimal
 import os
 import re
@@ -22,9 +23,9 @@ def _lookup_gate_spec_from_db(gate_style_code):
         pass
     return None, None
 
-from backend.core.shared.price_utils import resolve_price_info, has_valid_price_info, round_to_2_decimal
+from backend.core.shared.price_utils import resolve_price_info, has_valid_price_info, round_to_2_decimal, get_temp_adjusted_base_price, get_temp_base_price, apply_temp_preinstall_adjustment
 from backend.core.shared.text_utils import normalize_lookup_code
-from backend.core.shared.product_utils import _is_valid_product_code
+from backend.core.shared.product_utils import _is_valid_product_code, normalize_preinstall
 from backend.core.shared.weight_utils import extract_length_from_spec
 from backend.core.material_translate import translate_material
 
@@ -125,6 +126,13 @@ def _extract_fence_height_mm_from_style(style_code):
         return str(int(parts[-1]) * 10)
     except (ValueError, TypeError):
         return ''
+
+
+def _extract_fence_mesh_type_from_style(style_code):
+    if not style_code:
+        return ''
+    prefix = str(style_code).split('-')[0]
+    return '100x150' if 'C2' in prefix else '74x150'
 
 
 def _format_mm_to_meter_text(length_mm):
@@ -311,7 +319,7 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
     if str(angle).lower() == 'nan' or str(angle).lower().strip('°') == 'nan':
         angle = ''
     ground_height = nv_params.get('ground_height') or matrix_data.get('ground_height') or ''
-    span_ew = span_ew_override if span_ew_override is not None else (nv_params.get('span_ew') or 2700)
+    span_ew = span_ew_override if span_ew_override is not None else (nv_params.get('span_ew') or '')
     sales_name = nv_params.get('sales_name') or 'Nanami'
     sales_phone = nv_params.get('sales_phone') or '+86-137-7466-5835'
     sales_fax = nv_params.get('sales_fax') or '0086-592-5738212'
@@ -373,7 +381,7 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
     _set(ws, 4, 7, '発電量(W)/基', align=RIGHT_A)
     if is_inverter:
         _set(ws, 4, 8, '/')
-    elif module_wattage and rows_val and cols_val and span_ew:
+    elif module_wattage and rows_val and cols_val:
         panel_per_set = int(rows_val) * int(cols_val) if rows_val and cols_val else 0
         mb_val = int(missing_boards) if missing_boards else 0
         _cell_gen = _set(ws, 4, 8, f'=H3*({panel_per_set}+{mb_val})', align=LEFT_A)
@@ -441,6 +449,9 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
     for row_idx in range(data_start, data_start + len(bom_products)):
         ws.row_dimensions[row_idx].height = 40
 
+    _dg_entered = [str(p.get('code', '') or '').strip().upper() for p in bom_products if str(p.get('code', '') or '').strip().upper().startswith('DG-')]
+    print(f'[DEBUG_CAP] create_nv_detail_sheet received {len(bom_products)} products, DG- count={len(_dg_entered)} codes={_dg_entered}')
+
     for idx, product in enumerate(bom_products):
         row = data_start + idx
         product_code = product.get('code', '')
@@ -482,7 +493,7 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
         is_matched = False
 
         if price_info and has_valid_price_info(price_info):
-            unit_price = float(price_info['price'])
+            unit_price = get_temp_base_price(price_info, product, '日语组', 'export')
             price_unit = price_info.get('unit', '')
             matched_count += 1
             is_matched = True
@@ -496,6 +507,8 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
                     'spec': product.get('spec', ''),
                     'material': raw_material,
                     'quantity': quantity * _detail_table_qty,
+                    'weight': product.get('weight', 0),
+                    'preinstall': normalize_preinstall(product.get('preinstall')),
                 })
 
         is_meter = price_unit in ['米', 'm', 'M', 'meter', 'Meter', 'METERS', 'meters']
@@ -507,6 +520,7 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
             display_unit_price = float(Decimal(str(unit_price)) * length_mm / Decimal('1000'))
         else:
             display_unit_price = unit_price
+        display_unit_price = apply_temp_preinstall_adjustment(price_info, display_unit_price, product, '日语组', 'export')
 
         if display_unit_price > 0:
             cell = ws.cell(row=row, column=7, value=display_unit_price)
@@ -572,7 +586,9 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
             continue
         qty_val_cell = ws.cell(row=r, column=8).value
         if qty_val_cell is None or qty_val_cell == '' or (isinstance(qty_val_cell, (int, float)) and qty_val_cell == 0):
+            _code_val = ws.cell(row=r, column=2).value if False else None
             rows_to_delete.append(r)
+            print(f'[DEBUG_CAP] row {r} deleted for qty=0/empty: name={name_val} qty={qty_val_cell}')
 
     for r in sorted(rows_to_delete, reverse=True):
         ws.delete_rows(r)
@@ -807,7 +823,7 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
             pile_is_matched = False
             YELLOW_FILL = PatternFill(start_color='FFDDB3', end_color='FFDDB3', fill_type='solid')
             if price_info and has_valid_price_info(price_info):
-                unit_price = float(price_info['price'])
+                unit_price = get_temp_base_price(price_info, p, '日语组', 'export')
                 pile_is_matched = True
             else:
                 print(f"   ⚠ 杭価格未検出: code={code}, spec={p.get('spec', '')}, price_info={'found' if price_info else 'None'}")
@@ -829,6 +845,8 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
                 print(f"   ⚠ 杭長さ抽出失敗、メートル単価をそのまま使用: code={code}, spec={p.get('spec', '')}, unit_price={unit_price}")
             else:
                 display_unit_price = unit_price
+            if isinstance(display_unit_price, (int, float)):
+                display_unit_price = apply_temp_preinstall_adjustment(price_info, display_unit_price, p, '日语组', 'export')
             print(f"   🔍 杭計算: code={code}, unit_price={unit_price}, pricing_unit={pricing_unit}, length_mm={length_mm}, qty={qty}, display_unit_price={display_unit_price}")
             _real_total = display_unit_price * qty if isinstance(display_unit_price, (int, float)) and display_unit_price > 0 and qty > 0 else 0.0
             pile_total_per_base += _real_total
@@ -923,12 +941,7 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
 
         pile_data_end_row = pile_data_start_row + rendered_pile_count - 1 if rendered_pile_count > 0 else 0
 
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.75, bottom=0.75, left=0.25, right=0.25, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'ja_nv')
 
     discount_total_row = None
 
@@ -1390,12 +1403,7 @@ def _create_fence_detail_sheet(workbook, fence_rows, gate_rows, nv_fgg,
         ws.cell(row=discount_total_row, column=9).number_format = NUM_FMT
         ws.row_dimensions[discount_total_row].height = 25
 
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.75, bottom=0.75, left=0.25, right=0.25, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'ja_nv', 'ja_nv_fence')
 
     return {'sheet_name': sheet_name, 'discount_total_row': discount_total_row}
 
@@ -2367,7 +2375,10 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
                 length_display = f'{section_length_m:.2f}' if section_length_m % 1 else str(int(section_length_m))
                 fence_name = f'フェンス{length_display}m\n（網・柱材セット）'
                 fence_material = f'スチールQ235B\n表面：{coating_jp}'
+                _mesh_type = _extract_fence_mesh_type_from_style(fence_section_info.get('style', ''))
                 fence_spec = f'H{fence_h_val}*W2000'
+                if _mesh_type:
+                    fence_spec = f'H{fence_h_val}*W2000\n{_mesh_type}mm'
 
                 _s(row, 1, seq)
                 _s(row, 2, fence_name, align=Alignment(horizontal='center', vertical='center', wrap_text=True))
@@ -2715,11 +2726,11 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
         ws.cell(row=r_tax, column=2).border = THIN_BORDER
         ws.cell(row=r_tax, column=2).alignment = center
         ws.merge_cells(f'B{r_tax}:K{r_tax}')
-        _bp_base = f'L{r_disc}+L{r_bp_total}'
+        _bp_base = f'L{r_bp_total}'
         _fence_part = f'+L{r_fence_disc}' if all_fence_items else ''
         _ct_rate = round(consumption_tax_pct / 100, 4)
         _tr_rate = round(tariff_rate_pct / 100, 4)
-        tax_formula = f'=({_bp_base})*{_ct_rate}+({_bp_base}{_fence_part})*{_tr_rate}'
+        tax_formula = f'=({_bp_base}{_fence_part})*{_ct_rate}+({_bp_base})*{_tr_rate}'
         ws.cell(row=r_tax, column=12, value=tax_formula).font = SM_FONT_BOLD
         ws.cell(row=r_tax, column=12).alignment = center
         ws.cell(row=r_tax, column=12).border = THIN_BORDER
@@ -2991,12 +3002,7 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
         idx = sheet_names.index(actual_title)
         workbook.move_sheet(actual_title, offset=-idx)
 
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.75, bottom=0.75, left=0.25, right=0.25, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'ja_nv')
 
     return ws.title
 
@@ -3127,7 +3133,7 @@ def create_spare_parts_sheet(workbook, spare_products, price_mapping,
 
         display_unit_price = 0.0
         if price_info and has_valid_price_info(price_info):
-            display_unit_price = float(price_info['price'])
+            display_unit_price = get_temp_base_price(price_info, product, '日语组', 'export')
             pricing_unit = price_info.get('unit', '')
             if pricing_unit == '米':
                 length_mm = float(product.get('length', 0) or 0)
@@ -3135,6 +3141,7 @@ def create_spare_parts_sheet(workbook, spare_products, price_mapping,
                     length_mm = float(extract_length_from_spec(product.get('spec', '')) or 0)
                 if length_mm > 0:
                     display_unit_price = display_unit_price * length_mm / 1000
+            display_unit_price = apply_temp_preinstall_adjustment(price_info, display_unit_price, product, '日语组', 'export')
 
         ws.cell(row=row, column=7, value=display_unit_price).font = SM_FONT
         ws.cell(row=row, column=7).alignment = CENTER
@@ -3209,11 +3216,6 @@ def create_spare_parts_sheet(workbook, spare_products, price_mapping,
         else:
             ws.cell(row=row, column=5, value='/').alignment = CENTER
 
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.75, bottom=0.75, left=0.25, right=0.25, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'ja_nv')
 
     return ws.title

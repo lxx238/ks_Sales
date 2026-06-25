@@ -3,6 +3,7 @@ const ACCOUNTS_API_BASE_URL = typeof KS_API_BASE_URL !== 'undefined' ? KS_API_BA
 function roleToTarget(role) {
     switch (role) {
         case 'admin': return 'admin.html';
+        case '总助': return 'app.html?page=schedule';
         default: return 'app.html?group=韩语组';
     }
 }
@@ -87,6 +88,7 @@ async function upsertAccount(account) {
             tel: String(account?.tel || '').trim(),
             fax: String(account?.fax || '').trim(),
             email: String(account?.email || '').trim(),
+            dingtalkId: String(account?.dingtalkId || '').trim(),
             group: String(account?.group || '').trim(),
         }),
     });
@@ -128,6 +130,22 @@ async function importAccounts(file) {
     const formData = new FormData();
     formData.append('file', file);
     const url = `${ACCOUNTS_API_BASE_URL}/auth/accounts/import`;
+    const response = await fetch(url, {
+        method: 'POST',
+        credentials: 'same-origin',
+        body: formData,
+    });
+    const payload = await readAccountsApiJson(response);
+    if (!response.ok || payload.success === false) {
+        throw new Error(payload.message || `导入失败: ${response.status}`);
+    }
+    return payload;
+}
+
+async function importDingtalkUserids(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const url = `${ACCOUNTS_API_BASE_URL}/auth/accounts/import-userids`;
     const response = await fetch(url, {
         method: 'POST',
         credentials: 'same-origin',

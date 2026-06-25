@@ -9,7 +9,7 @@ from backend.utils.helpers import row_to_dict
 
 TABLE = 'ks_users'
 
-GROUP_SUFFIX = {'韩语组': '_h', '日语组': '_j', '英语组': '_e', '物流组': '_w'}
+GROUP_SUFFIX = {'韩语组': '_h', '日语组': '_j', '英语组': '_e', '亚太组': '_a', '物流组': '_w', '人事组': '_r', '设计组': '_s'}
 
 ALL_PERMISSIONS = [
     'quotation',
@@ -21,6 +21,7 @@ ALL_PERMISSIONS = [
     'records_review',
     'questions',
     'logistics',
+    'schedule',
 ]
 
 ROLE_TARGETS = {
@@ -28,7 +29,9 @@ ROLE_TARGETS = {
     '韩语业务员': 'app.html?group=韩语组',
     '英语业务员': 'app.html?group=英语组',
     '日语业务员': 'app.html?group=日语组',
+    '亚太业务员': 'app.html?group=亚太组',
     '业务助理': '',
+    '总助': 'app.html?page=schedule',
     '物流专员': 'app.html?group=物流组',
 }
 
@@ -37,7 +40,9 @@ ROLE_LABELS = {
     '韩语业务员': '韩语业务员',
     '英语业务员': '英语业务员',
     '日语业务员': '日语业务员',
+    '亚太业务员': '亚太业务员',
     '业务助理': '业务助理',
+    '总助': '总助',
     '物流专员': '物流专员',
 }
 
@@ -52,21 +57,24 @@ CREATE TABLE IF NOT EXISTS {TABLE} (
     tel TEXT NOT NULL DEFAULT '',
     fax TEXT NOT NULL DEFAULT '',
     email TEXT NOT NULL DEFAULT '',
+    dingtalk_id TEXT NOT NULL DEFAULT '',
     "group" TEXT NOT NULL DEFAULT '',
     role TEXT NOT NULL DEFAULT '',
     role_label TEXT NOT NULL DEFAULT '',
     target TEXT NOT NULL DEFAULT '',
     enabled INTEGER NOT NULL DEFAULT 1,
     permissions TEXT NOT NULL DEFAULT '[]',
+    preferences TEXT NOT NULL DEFAULT '{{}}',
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 )
 '''
 
-GROUP_ROLE_MAP = {'韩语组': '韩语业务员', '英语组': '英语业务员', '日语组': '日语业务员', '物流组': '物流专员'}
+GROUP_ROLE_MAP = {'韩语组': '韩语业务员', '英语组': '英语业务员', '日语组': '日语业务员', '亚太组': '亚太业务员', '物流组': '物流专员', '人事组': '总助', '设计组': '业务助理'}
 
 DEFAULT_USERS = [
     {'username': 'admin', 'password': 'Admin@123', 'name_china': '管理员', 'nickname': '', 'mob': '', 'tel': '', 'fax': '', 'email': '', 'group': '', 'role': 'admin', 'enabled': True, 'permissions': ALL_PERMISSIONS},
+    {'username': 'assistant', 'password': 'Assistant@123', 'name_china': '总经理助理', 'nickname': '', 'mob': '', 'tel': '', 'fax': '', 'email': '', 'group': '人事组', 'role': '总助', 'enabled': True, 'permissions': ['schedule']},
     {'password': 'Ko@123', 'name_china': '冯光英', 'nickname': '풍광영', 'mob': '0086-18050036912', 'tel': '', 'fax': '', 'email': 'judy@xmkseng.com', 'group': '韩语组', 'role': '韩语业务员', 'enabled': True, 'permissions': ALL_PERMISSIONS},
     {'password': '123', 'name_china': '陈佳宜', 'nickname': '진가의', 'mob': '0086-18050018213', 'tel': '', 'fax': '', 'email': 'hedy@xmkseng.com', 'group': '韩语组', 'role': '韩语业务员', 'enabled': True, 'permissions': ALL_PERMISSIONS},
     {'password': '123', 'name_china': '陈雪婷', 'nickname': '진설정', 'mob': '0086-18050053693', 'tel': '', 'fax': '', 'email': 'seol@xmkseng.com', 'group': '韩语组', 'role': '韩语业务员', 'enabled': True, 'permissions': ALL_PERMISSIONS},
@@ -150,6 +158,13 @@ def normalize_account_row(row):
         permissions_list = json.loads(raw_permissions) if isinstance(raw_permissions, str) else raw_permissions
     except (json.JSONDecodeError, TypeError):
         permissions_list = []
+    raw_preferences = data.get('preferences') or '{}'
+    try:
+        preferences_obj = json.loads(raw_preferences) if isinstance(raw_preferences, str) else raw_preferences
+        if not isinstance(preferences_obj, dict):
+            preferences_obj = {}
+    except (json.JSONDecodeError, TypeError):
+        preferences_obj = {}
     return {
         'id': data.get('id'),
         'username': str(data.get('username') or '').strip(),
@@ -159,12 +174,14 @@ def normalize_account_row(row):
         'tel': str(data.get('tel') or '').strip(),
         'fax': str(data.get('fax') or '').strip(),
         'email': str(data.get('email') or '').strip(),
+        'dingtalkId': str(data.get('dingtalk_id') or '').strip(),
         'group': str(data.get('group') or '').strip(),
         'role': str(data.get('role') or '').strip(),
         'roleLabel': str(data.get('role_label') or '').strip(),
         'target': str(data.get('target') or '').strip(),
         'enabled': bool(data.get('enabled', 1)),
         'permissions': permissions_list,
+        'preferences': preferences_obj,
         'createdAt': data.get('created_at'),
         'updatedAt': data.get('updated_at'),
     }
@@ -177,9 +194,17 @@ def ensure_user_schema():
         conn.execute(f'CREATE INDEX IF NOT EXISTS idx_{TABLE}_username ON {TABLE} (username)')
         conn.execute(f'CREATE INDEX IF NOT EXISTS idx_{TABLE}_group ON {TABLE} ("group")')
         conn.execute(f'CREATE INDEX IF NOT EXISTS idx_{TABLE}_role ON {TABLE} (role, enabled)')
+        _ensure_column(conn, 'preferences', "TEXT NOT NULL DEFAULT '{}'")
+        _ensure_column(conn, 'dingtalk_id', "TEXT NOT NULL DEFAULT ''")
         conn.commit()
     finally:
         conn.close()
+
+
+def _ensure_column(conn, column_name, column_def):
+    cols = {row[1] for row in conn.execute(f'PRAGMA table_info({TABLE})').fetchall()}
+    if column_name not in cols:
+        conn.execute(f'ALTER TABLE {TABLE} ADD COLUMN {column_name} {column_def}')
 
 
 def _table_exists(conn, table_name):
@@ -379,7 +404,8 @@ def verify_account_password(username, password):
 
 
 def save_account(username, password, role, enabled=True, permissions=None, name='',
-                 nickname='', mob='', tel='', fax='', email='', group=''):
+                 nickname='', mob='', tel='', fax='', email='', group='', dingtalk_id='',
+                 preferences=None):
     normalized_username = str(username or '').strip()
     normalized_password = str(password or '').strip()
     normalized_role = str(role or '').strip()
@@ -390,10 +416,13 @@ def save_account(username, password, role, enabled=True, permissions=None, name=
     normalized_fax = str(fax or '').strip()
     normalized_email = str(email or '').strip()
     normalized_group = str(group or '').strip()
+    normalized_dingtalk_id = str(dingtalk_id or '').strip()
     role_label = role_to_label(normalized_role)
     target = role_to_target(normalized_role, normalized_group)
     now = get_now_iso()
     perms_json = json.dumps(permissions if permissions is not None else (ALL_PERMISSIONS if normalized_role else []), ensure_ascii=False)
+    prefs_value = preferences if isinstance(preferences, dict) else {}
+    prefs_json = json.dumps(prefs_value, ensure_ascii=False)
 
     ensure_user_schema()
     conn = _get_conn()
@@ -403,7 +432,7 @@ def save_account(username, password, role, enabled=True, permissions=None, name=
             normalized_username = generate_username(normalized_name, normalized_group, existing_usernames)
 
         existing = conn.execute(
-            f'SELECT id, username, password_hash, created_at FROM {TABLE} WHERE username = ?',
+            f'SELECT id, username, password_hash, created_at, preferences FROM {TABLE} WHERE username = ?',
             (normalized_username,),
         ).fetchone()
 
@@ -411,11 +440,13 @@ def save_account(username, password, role, enabled=True, permissions=None, name=
             created_at = existing['created_at']
             old_hash = existing['password_hash'] or ''
             new_hash = generate_password_hash(normalized_password) if normalized_password else old_hash
+            if preferences is None:
+                prefs_json = str(existing['preferences'] or '{}')
             conn.execute(
                 f'''UPDATE {TABLE}
                 SET password_hash = ?, name_china = ?, nickname = ?, mob = ?, tel = ?, fax = ?, email = ?,
-                    "group" = ?, role = ?, role_label = ?, target = ?, enabled = ?, permissions = ?,
-                    updated_at = ?
+                    dingtalk_id = ?, "group" = ?, role = ?, role_label = ?, target = ?, enabled = ?,
+                    permissions = ?, preferences = ?, updated_at = ?
                 WHERE username = ?''',
                 (
                     new_hash,
@@ -425,12 +456,14 @@ def save_account(username, password, role, enabled=True, permissions=None, name=
                     normalized_tel,
                     normalized_fax,
                     normalized_email,
+                    normalized_dingtalk_id,
                     normalized_group,
                     normalized_role,
                     role_label,
                     target,
                     1 if enabled else 0,
                     perms_json,
+                    prefs_json,
                     now,
                     normalized_username,
                 ),
@@ -439,9 +472,9 @@ def save_account(username, password, role, enabled=True, permissions=None, name=
             created_at = now
             conn.execute(
                 f'''INSERT INTO {TABLE} (
-                    username, password_hash, name_china, nickname, mob, tel, fax, email,
-                    "group", role, role_label, target, enabled, permissions, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    username, password_hash, name_china, nickname, mob, tel, fax, email, dingtalk_id,
+                    "group", role, role_label, target, enabled, permissions, preferences, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (
                     normalized_username,
                     generate_password_hash(normalized_password) if normalized_password else '',
@@ -451,12 +484,14 @@ def save_account(username, password, role, enabled=True, permissions=None, name=
                     normalized_tel,
                     normalized_fax,
                     normalized_email,
+                    normalized_dingtalk_id,
                     normalized_group,
                     normalized_role,
                     role_label,
                     target,
                     1 if enabled else 0,
                     perms_json,
+                    prefs_json,
                     created_at,
                     now,
                 ),
@@ -471,12 +506,14 @@ def save_account(username, password, role, enabled=True, permissions=None, name=
             'tel': normalized_tel,
             'fax': normalized_fax,
             'email': normalized_email,
+            'dingtalkId': normalized_dingtalk_id,
             'group': normalized_group,
             'role': normalized_role,
             'roleLabel': role_label,
             'target': target,
             'enabled': bool(enabled),
             'permissions': permissions if permissions is not None else ALL_PERMISSIONS,
+            'preferences': prefs_value,
             'createdAt': created_at,
             'updatedAt': now,
         }
@@ -497,6 +534,52 @@ def update_account_password(username, password):
         )
         conn.commit()
         return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def _deep_merge(base, incoming):
+    if not isinstance(base, dict) or not isinstance(incoming, dict):
+        return incoming
+    merged = dict(base)
+    for key, value in incoming.items():
+        if value is None:
+            merged.pop(key, None)  # null = 删除该键（用于「恢复默认」）
+        elif isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def update_user_preferences(username, incoming):
+    normalized_username = str(username or '').strip()
+    if not isinstance(incoming, dict):
+        incoming = {}
+    now = get_now_iso()
+    ensure_user_schema()
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            f'SELECT preferences FROM {TABLE} WHERE username = ?',
+            (normalized_username,),
+        ).fetchone()
+        if not row:
+            return None
+        raw = row['preferences'] or '{}'
+        try:
+            existing = json.loads(raw) if isinstance(raw, str) else raw
+            if not isinstance(existing, dict):
+                existing = {}
+        except (json.JSONDecodeError, TypeError):
+            existing = {}
+        merged = _deep_merge(existing, incoming)
+        conn.execute(
+            f'UPDATE {TABLE} SET preferences = ?, updated_at = ? WHERE username = ?',
+            (json.dumps(merged, ensure_ascii=False), now, normalized_username),
+        )
+        conn.commit()
+        return merged
     finally:
         conn.close()
 
@@ -609,6 +692,55 @@ def bulk_import_accounts(accounts_data):
         conn.close()
 
     return results
+
+
+def bulk_update_dingtalk_id(updates):
+    ensure_user_schema()
+    conn = _get_conn()
+    results = {'success': [], 'failed': []}
+    try:
+        now = get_now_iso()
+        for item in updates:
+            name = str(item.get('name') or '').strip()
+            userid = str(item.get('dingtalk_id') or '').strip()
+            if not name:
+                results['failed'].append({'name': '(空)', 'dingtalkId': userid, 'reason': '姓名为空'})
+                continue
+            if not userid:
+                results['failed'].append({'name': name, 'dingtalkId': userid, 'reason': 'UserId 为空'})
+                continue
+            cursor = conn.execute(
+                f'UPDATE {TABLE} SET dingtalk_id = ?, updated_at = ? WHERE name_china = ?',
+                (userid, now, name),
+            )
+            if cursor.rowcount > 0:
+                results['success'].append({'name': name, 'dingtalkId': userid, 'count': cursor.rowcount})
+            else:
+                results['failed'].append({'name': name, 'dingtalkId': userid, 'reason': '未找到匹配人员'})
+        conn.commit()
+    finally:
+        conn.close()
+
+    return results
+
+
+def get_dingtalk_id_by_name(name):
+    """根据中文名（name_china）查询用户的钉钉 userid，返回字符串或空串。"""
+    name = str(name or '').strip()
+    if not name:
+        return ''
+    ensure_user_schema()
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            f'SELECT dingtalk_id FROM {TABLE} WHERE name_china = ?',
+            (name,),
+        ).fetchone()
+        if not row:
+            return ''
+        return str(row['dingtalk_id'] or '').strip()
+    finally:
+        conn.close()
 
 
 def reset_accounts():

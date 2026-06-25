@@ -65,6 +65,8 @@ def _get_engine_prefix(group, ko_case_type='', case_type='', en_case_type=''):
         return '御見積書'
     if group == '英语组':
         return 'Quotation'
+    if group == '亚太组':
+        return 'Quotation'
     return '报价表'
 
 
@@ -143,7 +145,7 @@ def generate_quotation_db_only(data):
         en_case_type = data.get('en_case_type', 'SIMPLE')
         en_lang = data.get('en_lang', 'en')
         _log_group = str(group or '')
-        _log_case_type = str(ko_case_type or en_case_type or '')
+        _log_case_type = ''
         need_weight_code = coerce_bool(data.get('need_weight_code'), default=False)
         need_weight = coerce_bool(data.get('need_weight'), default=False)
         need_code = coerce_bool(data.get('need_code'), default=False)
@@ -169,9 +171,15 @@ def generate_quotation_db_only(data):
         container_type = data.get('container_type', '40HQ')
         container_qty = data.get('container_qty', 1)
         sale_type = data.get('sale_type', 'export')
+        # 中文报价联动人民币：英语组选择中文时，强制内贸(RMB)价格列与货币标签
+        if group == '英语组' and en_lang == 'zh' and sale_type != 'domestic':
+            sale_type = 'domestic'
         ko_discount_rate = data.get('ko_discount_rate', 100)
         ko_steel_discount_rate = data.get('ko_steel_discount_rate', 84)
         ko_purchased_discount_rate = data.get('ko_purchased_discount_rate', 94)
+        ap_discount_rate = data.get('ap_discount_rate', 100)
+        ap_steel_discount_rate = data.get('ap_steel_discount_rate', 100)
+        ap_purchased_discount_rate = data.get('ap_purchased_discount_rate', 100)
         ko_tariff_rate = data.get('ko_tariff_rate', 1.6)
         ko_consumption_tax = data.get('ko_consumption_tax', 10)
         ko_freight = data.get('ko_freight', 0)
@@ -180,6 +188,17 @@ def generate_quotation_db_only(data):
         ko_exclude_options = data.get('ko_exclude_options') or {}
         ko_discount_in_detail = True
         confirmed_temp_codes = data.get('confirmed_temp_codes')
+        # 碳钢包装（简易包装/铁托）：决定报价时碳钢单价取哪套吨价预算价
+        steel_pack = str(data.get('steel_pack') or '').strip().lower()
+        if steel_pack not in ('jybz', 'tietuo'):
+            steel_pack = 'jybz'
+
+        if group == '日语组':
+            _log_case_type = str(case_type or '')
+        elif group == '英语组':
+            _log_case_type = str(en_case_type or '')
+        else:
+            _log_case_type = str(ko_case_type or '')
 
         ensure_required_value(bom_file_id, '缺少 BOM 文件 ID')
         log_generate(
@@ -237,6 +256,7 @@ def generate_quotation_db_only(data):
             ja_kwargs['consumption_tax'] = consumption_tax
             ja_kwargs['fence_tax'] = fence_tax
             ja_kwargs['discount_rate'] = discount_rate
+            ja_kwargs['exchange_rate'] = exchange_rate
             ja_kwargs['truck_desc'] = truck_desc
             ja_kwargs['truck_fee'] = truck_fee
             ja_kwargs['coating_thickness'] = coating_thickness
@@ -386,7 +406,7 @@ def generate_quotation_db_only(data):
             apply_confirmed_temp_codes(material_mapping, confirmed_temp_codes)
             log_generate(f'applied {len(confirmed_temp_codes)} confirmed temp codes')
         elif all_products:
-            temp_pricing_matched, _ = fetch_temp_material_pricing_fallback(all_products, material_mapping, group=group, sale_type=sale_type)
+            temp_pricing_matched, _ = fetch_temp_material_pricing_fallback(all_products, material_mapping, group=group, sale_type=sale_type, pack=steel_pack)
             if temp_pricing_matched:
                 log_generate(f'temp material pricing matched {len(temp_pricing_matched)} items')
             temp_auto_matched, temp_spec_mismatch = fetch_temp_code_fallback(all_products, material_mapping, group=group, sale_type=sale_type)
@@ -497,6 +517,17 @@ def generate_quotation_db_only(data):
             if container_details and isinstance(container_details, list):
                 ko_kwargs['container_details'] = container_details
 
+        ap_kwargs = {}
+        if group == '亚太组':
+            ap_kwargs['trade_method'] = trade_method
+            ap_kwargs['coating_thickness'] = coating_thickness
+            ap_kwargs['delete_options'] = delete_options
+            ap_kwargs['always_exclude_extra_items'] = True
+            ap_kwargs['bom_sheet_keyword'] = '屋顶'
+            ap_kwargs['ap_discount_rate'] = ap_discount_rate
+            ap_kwargs['ap_steel_discount_rate'] = ap_steel_discount_rate
+            ap_kwargs['ap_purchased_discount_rate'] = ap_purchased_discount_rate
+
         if group == '英语组':
             _bom_arr_count = len(en_products_by_key) if en_products_by_key else 0
             _matrix_arr_count = len([a for a in (matrix_data or {}).get('arrays', []) if (a.get('table_qty') or 0) > 0]) if matrix_data else 0
@@ -520,7 +551,8 @@ def generate_quotation_db_only(data):
             need_total_qty=need_total_qty,
             **ja_kwargs,
             **ko_kwargs,
-            **({'need_total_materials': need_total_materials} if group == '英语组' else {}),
+            **ap_kwargs,
+            **({'need_total_materials': need_total_materials} if group in ('英语组', '韩语组') else {}),
             **({'pre_parsed_bom_data': pre_parsed_bom_data} if pre_parsed_bom_data else {}),
         )
 

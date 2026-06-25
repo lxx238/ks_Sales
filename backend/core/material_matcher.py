@@ -1,4 +1,5 @@
 ﻿from collections import OrderedDict
+from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 
@@ -19,6 +20,7 @@ from backend.utils.constants import (
     DB_NAME_EN_COLUMN,
     DB_NAME_FR_COLUMN,
     DB_NAME_ES_COLUMN,
+    DB_NAME_ZH_COLUMN,
     DB_NAME_JA_COLUMN,
     DB_PILE_15_18UM_TABLE,
     DB_PRICE_COLUMN,
@@ -28,6 +30,7 @@ from backend.utils.constants import (
     DB_WEIGHT_COLUMN,
 )
 from backend.utils.converters import normalize_lookup_code, parse_price_value
+from backend.core.shared.product_utils import normalize_preinstall
 
 
 def log_match(message):
@@ -174,6 +177,7 @@ def fetch_material_mapping(material_codes, group=None, sale_type='export', coati
             'name_en': str(row.get(DB_NAME_EN_COLUMN) or '').strip(),
             'name_fr': str(row.get(DB_NAME_FR_COLUMN) or '').strip(),
             'name_es': str(row.get(DB_NAME_ES_COLUMN) or '').strip(),
+            'name_zh': str(row.get(DB_NAME_ZH_COLUMN) or '').strip(),
             'name_ja': str(row.get(DB_NAME_JA_COLUMN) or '').strip(),
             'unit': str(row.get(DB_UNIT_COLUMN) or '').strip(),
             'price': price_value,
@@ -468,7 +472,21 @@ def fetch_temp_code_fallback(products, material_mapping, group=None, sale_type='
                 'spec': spec,
                 'name': str(product.get('name') or '').strip(),
                 'quantity': product.get('quantity', 0),
+                'preinstall': normalize_preinstall(product.get('preinstall')),
             })
+
+    _pi_override = {}
+    for _p in products:
+        _n = normalize_lookup_code(str(_p.get('code') or '').strip())
+        if not _n:
+            continue
+        _s = _normalize_spec_for_compare(str(_p.get('spec') or '').strip())
+        if normalize_preinstall(_p.get('preinstall')) == '非预装':
+            _pi_override[(_n, _s)] = '非预装'
+    for _ui in unmatched_products:
+        _k = (_ui['normalized'], _normalize_spec_for_compare(_ui['spec']))
+        if _k in _pi_override:
+            _ui['preinstall'] = '非预装'
 
     if not unmatched_products:
         return [], []
@@ -478,14 +496,25 @@ def fetch_temp_code_fallback(products, material_mapping, group=None, sale_type='
     try:
         all_codes = list({t[0] for t in seen})
         placeholders = ','.join('?' for _ in all_codes)
+        now_str = datetime.now().strftime('%Y-%m-%d')
         rows = conn.execute(
             f'SELECT material_code, spec, quantity, name, unit_price, '
             f'unit_price_usd, unit_price_cny, unit_price_eur, unit, '
-            f'quotation_date, valid_until '
+            f'quotation_date, valid_until, preinstall '
             f'FROM ks_inquiry_price_cache '
-            f'WHERE material_code IN ({placeholders})',
-            all_codes
+            f'WHERE material_code IN ({placeholders}) '
+            f"AND (valid_until IS NULL OR valid_until = '' OR valid_until >= ?)",
+            [*all_codes, now_str]
         ).fetchall()
+        expired_rows = conn.execute(
+            f'SELECT material_code FROM ks_inquiry_price_cache '
+            f'WHERE material_code IN ({placeholders}) '
+            f"AND valid_until != '' AND valid_until < ?",
+            [*all_codes, now_str]
+        ).fetchall()
+        expired_count = len(expired_rows)
+        if expired_count:
+            log_match(f'temp cache: skipped {expired_count} expired entries (before {now_str})')
     finally:
         conn.close()
 
@@ -629,6 +658,7 @@ def fetch_temp_code_fallback(products, material_mapping, group=None, sale_type='
                 'name_en': db_name_en,
                 'name_fr': '',
                 'name_es': '',
+                'name_zh': '',
                 'name_ja': db_name_ja,
                 'unit': str(matched_entry.get('unit') or '').strip(),
                 'price': final_price,
@@ -642,11 +672,13 @@ def fetch_temp_code_fallback(products, material_mapping, group=None, sale_type='
                 'image_ext': None,
                 'issue_reason': None,
                 'source': 'temp_db',
+                'temp_inquiry': True,
                 '_spec_prices': {
                     **prev_spec_prices,
                     norm_bom_spec: {
                         'price': final_price,
                         'unit': str(matched_entry.get('unit') or '').strip(),
+                        'temp_inquiry': True,
                     },
                 },
             }
@@ -661,8 +693,15 @@ def fetch_temp_code_fallback(products, material_mapping, group=None, sale_type='
                 'price': final_price,
                 'unit': matched_entry.get('unit', ''),
                 'source': 'temp_db_fuzzy' if fuzzy_match else 'temp_db',
+                'source_date': str(matched_entry.get('quotation_date') or '').strip(),
                 'cache_spec': str(matched_entry.get('spec') or '').strip(),
                 'cache_quantity': matched_entry.get('quantity', 0),
+                'preinstall': mr['item'].get('preinstall') or matched_entry.get('preinstall') or '预装',
+                'adjusted_price': _compute_adjusted_price(
+                    final_price,
+                    mr['item'].get('preinstall') or matched_entry.get('preinstall') or '预装',
+                    group=group, sale_type=sale_type,
+                ),
             })
         elif partial_matches:
             spec_mismatch.append({
@@ -725,8 +764,11 @@ _METER_UNITS = {'米', 'm', 'M', 'meter', 'Meter', 'METERS', 'meters'}
 _TON_SIDE_KEYS = {'ext': 'external', 'int': 'internal'}
 
 
-def fetch_temp_material_pricing_fallback(products, material_mapping, group=None, sale_type='export'):
+def fetch_temp_material_pricing_fallback(products, material_mapping, group=None, sale_type='export', pack=None):
     from backend.core.shared.weight_utils import extract_length_from_spec
+
+    # 包装类型（碳钢按简易包装/铁托区分吨价），默认简易包装
+    pack = pack if pack in ('jybz', 'tietuo') else 'jybz'
 
     unmatched_products = []
     seen = set()
@@ -751,7 +793,21 @@ def fetch_temp_material_pricing_fallback(products, material_mapping, group=None,
                 'spec': spec,
                 'name': str(product.get('name') or '').strip(),
                 'quantity': product.get('quantity', 0),
+                'preinstall': normalize_preinstall(product.get('preinstall')),
             })
+
+    _pi_override = {}
+    for _p in products:
+        _n = normalize_lookup_code(str(_p.get('code') or '').strip())
+        if not _n:
+            continue
+        _s = _normalize_spec_for_compare(str(_p.get('spec') or '').strip())
+        if normalize_preinstall(_p.get('preinstall')) == '非预装':
+            _pi_override[(_n, _s)] = '非预装'
+    for _ui in unmatched_products:
+        _k = (_ui['normalized'], _normalize_spec_for_compare(_ui['spec']))
+        if _k in _pi_override:
+            _ui['preinstall'] = '非预装'
 
     if not unmatched_products:
         return [], []
@@ -839,7 +895,7 @@ def fetch_temp_material_pricing_fallback(products, material_mapping, group=None,
         length_mm = extract_length_from_spec(bom_spec)
         length_tier = _determine_length_tier(length_mm)
 
-        col_name = f'{side}_{ton_tier}_{length_tier}_{currency}'
+        col_name = f'{side}_{ton_tier}_{length_tier}_{currency}_{pack}'
         price_val = temp_row.get(col_name)
         try:
             price = float(price_val) if price_val is not None else 0.0
@@ -867,6 +923,7 @@ def fetch_temp_material_pricing_fallback(products, material_mapping, group=None,
             'name_en': db_name_en,
             'name_fr': '',
             'name_es': '',
+            'name_zh': '',
             'name_ja': db_name_ja,
             'unit': pricing_unit,
             'price': price,
@@ -880,11 +937,13 @@ def fetch_temp_material_pricing_fallback(products, material_mapping, group=None,
             'image_ext': None,
             'issue_reason': None,
             'source': 'temp_material_pricing',
+            'temp_inquiry': True,
             '_spec_prices': {
                 **prev_spec_prices,
                 norm_spec: {
                     'price': price,
                     'unit': pricing_unit,
+                    'temp_inquiry': True,
                 },
             },
         }
@@ -892,11 +951,18 @@ def fetch_temp_material_pricing_fallback(products, material_mapping, group=None,
         if code:
             material_mapping[code] = record
 
+        display_price = price
+        if is_meter:
+            _disp_len_mm = extract_length_from_spec(bom_spec) or 0
+            if _disp_len_mm and _disp_len_mm > 0:
+                display_price = price * _disp_len_mm / 1000.0
+        _pre = item.get('preinstall') or '预装'
+
         auto_matched.append({
             'code': code,
             'spec': bom_spec,
             'quantity': item.get('quantity', 0),
-            'price': price,
+            'price': round(display_price, 6),
             'unit': pricing_unit,
             'source': 'temp_material_pricing',
             'total_weight_ton': round(total_weight_ton, 3),
@@ -905,6 +971,11 @@ def fetch_temp_material_pricing_fallback(products, material_mapping, group=None,
             'side': side,
             'currency': currency,
             'col_name': col_name,
+            'preinstall': _pre,
+            'adjusted_price': _compute_adjusted_price(
+                display_price, _pre,
+                group=group, sale_type=sale_type,
+            ),
         })
 
     if auto_matched:
@@ -950,6 +1021,7 @@ def apply_confirmed_temp_codes(material_mapping, confirmed_temp_codes):
             'name_en': db_name_en,
             'name_fr': '',
             'name_es': '',
+            'name_zh': '',
             'name_ja': db_name_ja,
             'unit': str(info.get('unit') or '').strip(),
             'price': final_price,
@@ -963,7 +1035,26 @@ def apply_confirmed_temp_codes(material_mapping, confirmed_temp_codes):
             'image_ext': None,
             'issue_reason': None,
             'source': 'temp_db_confirmed',
+            'temp_inquiry': True,
         }
         material_mapping[normalized] = record
         if code:
             material_mapping[code] = record
+
+
+def _compute_adjusted_price(base_price, preinstall, group=None, sale_type='export'):
+    """供临时询价匹配结果展示用：按预装公式算出「预装情况对应金额」。
+
+    与 price_utils.get_temp_adjusted_base_price 口径一致，独立实现以避免循环导入。
+    """
+    from backend.core.shared.price_utils import _temp_pricing_currency
+    try:
+        base = float(base_price)
+    except (TypeError, ValueError):
+        return None
+    if _temp_pricing_currency(group, sale_type) in ('rmb', 'rmb_fx'):
+        return base
+    pre = normalize_preinstall(preinstall)
+    if pre == '非预装':
+        return round(base * 1.1, 6)
+    return round(base + 1, 6)

@@ -21,6 +21,7 @@ function getPermissionPage(permissions) {
         'records': 'records',
         'questions': 'questions',
         'logistics': 'logistics',
+        'schedule': 'schedule',
     };
     if (Array.isArray(permissions) && permissions.length > 0) {
         for (const perm of permissions) {
@@ -33,7 +34,8 @@ function getPermissionPage(permissions) {
 function buildTargetWithPermission(account) {
     const baseTarget = account.target || 'app.html?group=韩语组';
     if (account.role === 'admin') return resolveFrontendPageTarget(baseTarget);
-    const page = getPermissionPage(account.permissions);
+    let page = getPermissionPage(account.permissions);
+    if (account.group === '设计组') page = 'email-mgmt';
     const url = buildFrontendPageUrl(baseTarget);
     url.searchParams.set('page', page);
     return `${url.pathname}${url.search}${url.hash}`;

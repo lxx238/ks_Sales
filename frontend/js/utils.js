@@ -60,3 +60,24 @@ function resolveFrontendPageTarget(target) {
         return String(target || '').trim() || 'login.html';
     }
 }
+
+// 各案件默认打印参数（与后端 backend/core/print_settings.py 保持一致，单位：英寸）
+// 必须与后端 CASE_DEFAULTS / SHEET_DEFAULTS 同步维护。
+window.KS_PRINT_DEFAULTS = {
+    ko_normal: { orientation: 'portrait', fit_mode: 'fit_width', horizontal_centered: false, margin_top: 0.75, margin_bottom: 0.75, margin_left: 0.7, margin_right: 0.7 },
+    ko_simple: { orientation: 'portrait', fit_mode: 'fit_width', horizontal_centered: false, margin_top: 0.75, margin_bottom: 0.75, margin_left: 0.7, margin_right: 0.7 },
+    ko_ksd: { orientation: 'portrait', fit_mode: 'fit_width', horizontal_centered: false, margin_top: 0.75, margin_bottom: 0.75, margin_left: 0.7, margin_right: 0.7 },
+    ja_EST: { orientation: 'portrait', fit_mode: 'fit_width', horizontal_centered: false, margin_top: 0.75, margin_bottom: 0.75, margin_left: 0.7, margin_right: 0.7 },
+    ja_normal: { orientation: 'portrait', fit_mode: 'fit_width', horizontal_centered: true, margin_top: 1.2 / 2.54, margin_bottom: 0.4 / 2.54, margin_left: 1.2 / 2.54, margin_right: 1.2 / 2.54 },
+    ja_nv: { orientation: 'portrait', fit_mode: 'fit_width', horizontal_centered: false, margin_top: 0.75, margin_bottom: 0.75, margin_left: 0.25, margin_right: 0.25 },
+    en_simple: { orientation: 'portrait', fit_mode: 'fit_width', horizontal_centered: false, margin_top: 0.75, margin_bottom: 0.75, margin_left: 0.7, margin_right: 0.7 },
+    en_common: { orientation: 'portrait', fit_mode: 'fit_width', horizontal_centered: false, margin_top: 0.5, margin_bottom: 0.5, margin_left: 0.25, margin_right: 0.25 },
+    ap_common: { orientation: 'landscape', fit_mode: 'fit_width', horizontal_centered: false, margin_top: 0.75, margin_bottom: 0.75, margin_left: 0.7, margin_right: 0.7 },
+};
+window.KS_PRINT_LABELS = {
+    ko_normal: '韩语-标准', ko_simple: '韩语-简易', ko_ksd: '韩语-KSD',
+    ja_EST: '日语-EST', ja_normal: '日语-普通', ja_nv: '日语-NV',
+    en_simple: '英语-简易', en_common: '英语-通用', ap_common: '亚太分销',
+};
+// 打印字段顺序（用于渲染表格）
+window.KS_PRINT_FIELDS = ['orientation', 'fit_mode', 'horizontal_centered', 'margin_top', 'margin_bottom', 'margin_left', 'margin_right'];

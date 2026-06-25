@@ -191,12 +191,36 @@ def _find_config_zip(parsed_rows, bom_row, max_row, search_end=None):
             if val is not None and '是' in str(val):
                 config['variant'] = '可调'
 
+        if not config['cross_span'] and '导轨伸出面板长度' in row_str:
+            sorted_cols = sorted(cells.keys())
+            anchor_col = None
+            for col_idx in sorted_cols:
+                if '导轨伸出面板长度' in str(cells[col_idx]):
+                    anchor_col = col_idx
+                    break
+            if anchor_col is not None:
+                for col_idx in sorted_cols:
+                    if col_idx <= anchor_col:
+                        continue
+                    val = str(cells[col_idx]).strip()
+                    if any(stop in val for stop in ['单基侧压总数', '阵列基数', '标准定价', '切法辅助']):
+                        break
+                    m = re.search(r'(\d+(?:\.\d+)?)', val)
+                    if not m:
+                        continue
+                    num = float(m.group(1))
+                    if 500 <= num <= 20000:
+                        config['cross_span'] = m.group(1).rstrip('0').rstrip('.') if '.' in m.group(1) else m.group(1)
+                        break
+
         if not config['cross_span'] and '跨距' in row_str:
             _, val = _find_label_value(cells, '跨距')
             if val is not None:
                 m = re.search(r'(\d+(?:\.\d+)?)', str(val))
                 if m:
-                    config['cross_span'] = m.group(1)
+                    num = float(m.group(1))
+                    if 500 <= num <= 20000:
+                        config['cross_span'] = m.group(1).rstrip('0').rstrip('.') if '.' in m.group(1) else m.group(1)
     return config
 
 

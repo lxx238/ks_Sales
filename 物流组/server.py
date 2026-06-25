@@ -944,28 +944,41 @@ def chat():
                     for item in existing:
                         for kf in [key_field, alt_key_field]:
                             if kf and kf in item:
-                                existing_keys.add(str(item[kf]))
+                                val = str(item[kf]).strip()
+                                if val:
+                                    existing_keys.add(val)
                     for item in new_items:
+                        if not isinstance(item, dict):
+                            continue
                         matched = False
                         for kf in [key_field, alt_key_field]:
-                            if kf and kf in item and str(item[kf]) in existing_keys:
-                                matched = True
-                                break
+                            if kf and kf in item:
+                                val = str(item[kf]).strip()
+                                if val and val in existing_keys:
+                                    matched = True
+                                    break
                         if not matched:
                             existing.append(item)
                     return existing
 
+                # 托盘清单：优先解析 ===托盘清单=== 标记块；若 AI 未带标记，
+                # 自动从整段回复中检测含"托盘序号/托盘编码"的 JSON 并补充进托盘清单
+                pallet_new = []
                 if '托盘清单' in section_map:
                     pallet_new = extract_array(section_map['托盘清单'], '托盘序号')
                     if not pallet_new:
                         pallet_new = extract_array(section_map['托盘清单'], '托盘编码')
-                    if pallet_new:
-                        pallet = merge_json(
-                            os.path.join(dirs['output_new'], '托盘清单.json'),
-                            pallet_new, '托盘序号', '托盘编码')
-                        with open(os.path.join(dirs['output_new'], '托盘清单.json'), 'w', encoding='utf-8') as f:
-                            json.dump(pallet, f, ensure_ascii=False, indent=2)
-                        updated = True
+                if not pallet_new:
+                    pallet_new = extract_array(full_reply, '托盘序号')
+                    if not pallet_new:
+                        pallet_new = extract_array(full_reply, '托盘编码')
+                if pallet_new:
+                    pallet = merge_json(
+                        os.path.join(dirs['output_new'], '托盘清单.json'),
+                        pallet_new, '托盘序号', '托盘编码')
+                    with open(os.path.join(dirs['output_new'], '托盘清单.json'), 'w', encoding='utf-8') as f:
+                        json.dump(pallet, f, ensure_ascii=False, indent=2)
+                    updated = True
 
                 if '英文单套预装明细' in section_map:
                     english_new = extract_array(section_map['英文单套预装明细'], '套装编码')

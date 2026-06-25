@@ -1,5 +1,6 @@
 function formatRoleLabel(account) {
     if (!account) return '';
+    if (account.group === '设计组' && account.role === '业务助理') return '设计组';
     if (account.roleLabel) return account.roleLabel;
     if (account.role === 'admin') return '管理员';
     return account.role || '';
@@ -32,6 +33,31 @@ function showAdminMessage(message, type = 'info') {
 
 function showImportMessage(message, type = 'info') {
     const box = document.getElementById('import-message');
+    if (!box) return;
+    if (!message) {
+        box.style.display = 'none';
+        box.textContent = '';
+        return;
+    }
+    box.style.display = 'block';
+    box.textContent = message;
+    if (type === 'error') {
+        box.style.background = '#fee2e2';
+        box.style.borderColor = '#fecaca';
+        box.style.color = '#991b1b';
+    } else if (type === 'success') {
+        box.style.background = '#dcfce7';
+        box.style.borderColor = '#bbf7d0';
+        box.style.color = '#166534';
+    } else {
+        box.style.background = '#f1f5f9';
+        box.style.borderColor = '#e2e8f0';
+        box.style.color = '#475569';
+    }
+}
+
+function showBoxMessage(boxId, message, type = 'info') {
+    const box = document.getElementById(boxId);
     if (!box) return;
     if (!message) {
         box.style.display = 'none';
@@ -96,6 +122,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const jaEl = document.getElementById('ja-accounts');
     const enEl = document.getElementById('en-accounts');
     const wlEl = document.getElementById('wl-accounts');
+    const designEl = document.getElementById('design-accounts');
     const adminEl = document.getElementById('admin-accounts');
 
     const tableBody = document.getElementById('account-table-body');
@@ -109,6 +136,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const telInput = document.getElementById('account-tel');
     const faxInput = document.getElementById('account-fax');
     const emailInput = document.getElementById('account-email');
+    const dingtalkIdInput = document.getElementById('account-dingtalk-id');
     const groupSelect = document.getElementById('account-group');
     const passwordInput = document.getElementById('account-password');
     const roleSelect = document.getElementById('account-role');
@@ -134,6 +162,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (jaEl) jaEl.textContent = accounts.filter(a => a.group === '日语组').length;
         if (enEl) enEl.textContent = accounts.filter(a => a.group === '英语组').length;
         if (wlEl) wlEl.textContent = accounts.filter(a => a.group === '物流组').length;
+        if (designEl) designEl.textContent = accounts.filter(a => a.group === '设计组').length;
         if (adminEl) adminEl.textContent = accounts.filter(a => a.role === 'admin').length;
     }
 
@@ -152,12 +181,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     const ROLE_PERMISSION_PRESETS = {
-        '管理员': ['quotation', 'cad', 'database', 'database_submit', 'database_download', 'records', 'records_review', 'questions'],
+        '管理员': ['quotation', 'cad', 'database', 'database_submit', 'database_download', 'records', 'records_review', 'questions', 'logistics', 'schedule'],
         '韩语业务员': ['quotation', 'cad', 'database', 'records', 'questions'],
         '英语业务员': ['quotation', 'cad', 'database', 'records', 'questions'],
         '日语业务员': ['quotation', 'cad', 'database', 'records', 'questions'],
+        '亚太业务员': ['quotation', 'cad', 'database', 'records', 'questions'],
         '业务助理': ['quotation', 'database', 'records'],
+        '设计组': ['quotation'],
+        '总助': ['schedule'],
         '物流专员': ['logistics'],
+    };
+
+    const GROUP_DEFAULT_ROLE = {
+        '韩语组': '韩语业务员',
+        '英语组': '英语业务员',
+        '日语组': '日语业务员',
+        '亚太组': '亚太业务员',
+        '物流组': '物流专员',
+        '人事组': '总助',
+        '设计组': '设计组',
+    };
+    const GROUP_PERMISSION_PRESETS = {
+        '设计组': ['quotation'],
     };
 
     function openForm(title) {
@@ -179,6 +224,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (telInput) telInput.value = '';
         if (faxInput) faxInput.value = '';
         if (emailInput) emailInput.value = '';
+        if (dingtalkIdInput) dingtalkIdInput.value = '';
         if (groupSelect) groupSelect.value = '';
         if (passwordInput) passwordInput.value = '';
         if (roleSelect) roleSelect.value = '韩语业务员';
@@ -191,6 +237,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (roleSelect) {
         roleSelect.addEventListener('change', () => {
             const preset = ROLE_PERMISSION_PRESETS[roleSelect.value];
+            if (preset) setPermissionCheckboxes(preset);
+        });
+    }
+
+    if (groupSelect) {
+        groupSelect.addEventListener('change', () => {
+            const g = groupSelect.value;
+            const defaultRole = GROUP_DEFAULT_ROLE[g];
+            if (defaultRole) roleSelect.value = defaultRole;
+            const preset = GROUP_PERMISSION_PRESETS[g] || ROLE_PERMISSION_PRESETS[roleSelect.value];
             if (preset) setPermissionCheckboxes(preset);
         });
     }
@@ -286,9 +342,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                     telInput.value = target.tel || '';
                     faxInput.value = target.fax || '';
                     emailInput.value = target.email || '';
+                    if (dingtalkIdInput) dingtalkIdInput.value = target.dingtalkId || '';
                     groupSelect.value = target.group || '';
                     passwordInput.value = '';
-                    roleSelect.value = target.role === 'admin' ? 'admin' : (target.role || '韩语业务员');
+                    if (target.group === '设计组' && target.role === '业务助理') {
+                        roleSelect.value = '设计组';
+                    } else {
+                        roleSelect.value = target.role === 'admin' ? 'admin' : (target.role || '韩语业务员');
+                    }
                     if (enabledToggle) enabledToggle.checked = target.enabled !== false;
                     setPermissionCheckboxes(target.permissions || []);
                     openForm('编辑：' + (target.name || target.username));
@@ -319,7 +380,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             const tel = (telInput.value || '').trim();
             const fax = (faxInput.value || '').trim();
             const email = (emailInput.value || '').trim();
-            const group = groupSelect.value;
+            const dingtalkId = (dingtalkIdInput ? dingtalkIdInput.value : '').trim();
+            let group = groupSelect.value;
             const password = (passwordInput.value || '').trim();
             const roleValue = roleSelect.value;
             const enabled = !!(enabledToggle && enabledToggle.checked);
@@ -329,7 +391,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 return;
             }
 
-            const role = roleValue === '管理员' ? 'admin' : roleValue;
+            let role = roleValue === '管理员' ? 'admin' : roleValue;
+            if (role === '设计组') {
+                role = '业务助理';
+                group = '设计组';
+            }
 
             if (role && !password && !usernameInput.dataset.existing) {
                 showAdminMessage('新账号必须设置密码。', 'error');
@@ -348,6 +414,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     tel,
                     fax,
                     email,
+                    dingtalkId,
                     group,
                     role,
                     enabled,
@@ -418,6 +485,45 @@ document.addEventListener('DOMContentLoaded', async () => {
                     importBtn.textContent = '开始导入';
                 }
                 if (importFileInput) importFileInput.value = '';
+            }
+        });
+    }
+
+    const importUseridsForm = document.getElementById('import-userids-form');
+    const importUseridsFileInput = document.getElementById('import-userids-file');
+    if (importUseridsForm) {
+        importUseridsForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const file = importUseridsFileInput ? importUseridsFileInput.files[0] : null;
+            if (!file) {
+                showBoxMessage('import-userids-message', '请先选择要上传的 Excel 文件。', 'error');
+                return;
+            }
+
+            const useridsBtn = document.getElementById('import-userids-btn');
+            if (useridsBtn) {
+                useridsBtn.disabled = true;
+                useridsBtn.textContent = '补充中...';
+            }
+
+            try {
+                const result = await importDingtalkUserids(file);
+                const failed = Array.isArray(result.failedItems) ? result.failedItems : [];
+                let message = result.message || '补充完成';
+                if (failed.length) {
+                    const detail = failed.map(f => `${f.name}（${f.reason}）`).join('、');
+                    message += `。未匹配：${detail}`;
+                }
+                showBoxMessage('import-userids-message', message, failed.length ? 'info' : 'success');
+                await renderAll();
+            } catch (error) {
+                showBoxMessage('import-userids-message', error.message || '补充失败', 'error');
+            } finally {
+                if (useridsBtn) {
+                    useridsBtn.disabled = false;
+                    useridsBtn.textContent = '开始补充';
+                }
+                if (importUseridsFileInput) importUseridsFileInput.value = '';
             }
         });
     }

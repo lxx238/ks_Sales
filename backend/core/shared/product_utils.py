@@ -4,6 +4,19 @@ from backend.core.shared.constants import EXCLUDE_ITEM_GROUPS
 from backend.core.shared.price_utils import resolve_price_info
 
 
+def normalize_preinstall(value):
+    """将 BOM 预装标记归一化为规范值。
+
+    碳钢物料的「预装情况」列在 BOM 中为「不预装」或留空（默认预装）。
+    统一归一化为「预装」/「非预装」，便于展示与入库。日韩询价未特别标注
+    不预装的，默认按「预装」处理。
+    """
+    text = str(value or '').strip()
+    if '不预装' in text or '非预装' in text:
+        return '非预装'
+    return '预装'
+
+
 def _is_valid_product_code(code):
     if not code:
         return False

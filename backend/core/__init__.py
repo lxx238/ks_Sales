@@ -48,5 +48,8 @@ def split_and_create_quotations(*args, **kwargs):
     if group == '韩语组' and ko_case_type == 'NORMAL':
         from backend.core.ko_normal.quotation_builder import split_and_create_quotations as ko_split
         return ko_split(*args, **kwargs)
+    if group == '亚太组':
+        from backend.core.ap_common.quotation_builder import split_and_create_quotations as ap_split
+        return ap_split(*args, **kwargs)
     from backend.core.ko_normal.quotation_builder import split_and_create_quotations as ko_split
     return ko_split(*args, **kwargs)

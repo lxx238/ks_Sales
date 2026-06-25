@@ -11,6 +11,7 @@ DB_NAME_EN_COLUMN = '工程品名--英语'
 DB_NAME_JA_COLUMN = '工程品名--日语'
 DB_NAME_FR_COLUMN = '工程品名--法语'
 DB_NAME_ES_COLUMN = '工程品名--西班牙语'
+DB_NAME_ZH_COLUMN = '工程品名--中文'
 
 GROUP_NAME_COLUMN_MAP = {
     '韩语组': DB_NAME_KO_COLUMN,

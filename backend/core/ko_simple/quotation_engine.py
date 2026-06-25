@@ -7,6 +7,7 @@ from openpyxl.styles import Font, Alignment, Border, Side, PatternFill, numbers
 from openpyxl.utils import get_column_letter
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.worksheet.page import PageMargins
+from backend.core.print_settings import apply_print_setup
 
 from backend.core.shared.bom_utils import (
     read_bom_from_dataframe,
@@ -19,6 +20,8 @@ from backend.core.shared.price_utils import (
     round_to_2_decimal,
     _get_discount_category,
     _get_discount_rate,
+    get_temp_adjusted_base_price,
+    get_temp_base_price, apply_temp_preinstall_adjustment,
 )
 from backend.core.shared.weight_utils import (
     extract_length_from_spec,
@@ -34,6 +37,7 @@ from backend.core.shared.text_utils import (
 from backend.core.shared.product_utils import (
     _is_valid_product_code,
     _match_exclude_group,
+    normalize_preinstall,
 )
 from backend.core.shared.constants import (
     EXCLUDE_ITEM_GROUPS,
@@ -402,16 +406,17 @@ def create_ksd_detail_sheet(
 
     if need_weight_code:
         column_widths = {
-            'A': 15.77, 'B': 28.67, 'C': 45, 'D': 30.03, 'E': 34.58,
-            'F': 24.58, 'G': 25.49, 'H': 24.13, 'I': 22.31, 'J': 25.49,
+            'A': 2, 'B': 10, 'C': 28.67, 'D': 45, 'E': 30.03, 'F': 34.58,
+            'G': 24.58, 'H': 25.49, 'I': 24.13, 'J': 22.31, 'K': 25.49,
         }
     else:
         column_widths = {
-            'A': 15.77, 'B': 28.67, 'C': 38, 'D': 30.03, 'E': 34.58,
-            'F': 24.58, 'G': 25.49, 'H': 24.13, 'I': 25.49,
+            'A': 2, 'B': 10, 'C': 28.67, 'D': 38, 'E': 30.03, 'F': 34.58,
+            'G': 24.58, 'H': 25.49, 'I': 24.13, 'J': 25.49,
         }
-    max_col = 10 if need_weight_code else 9
+    max_col = 11 if need_weight_code else 10
     max_col_letter = get_column_letter(max_col)
+    image_col_index = IMAGE_COLUMN_INDEX + 1
     for col, width in column_widths.items():
         ws.column_dimensions[col].width = width
 
@@ -435,39 +440,31 @@ def create_ksd_detail_sheet(
     ws['A2'].font = title_font
     ws['A2'].alignment = center_align
 
-    ws.merge_cells('A3:B7')
+    ws.merge_cells('A3:C7')
     if image_path and os.path.exists(image_path):
         try:
             img = XLImage(img=image_path)
-            width_a = ws.column_dimensions['A'].width
             width_b = ws.column_dimensions['B'].width
-            total_width_pixels = (width_a + width_b) * 7
+            width_c = ws.column_dimensions['C'].width
+            total_width_pixels = (width_b + width_c) * 7
             height_4 = ws.row_dimensions[4].height
             height_5 = ws.row_dimensions[5].height
             height_6 = ws.row_dimensions[6].height
             total_height_pts = height_4 + height_5 + height_6
             total_height_pixels = total_height_pts * 1.33
-            target_width = total_width_pixels * 1.05
-            target_height = total_height_pixels * 1.8
-            original_width = img.width
-            original_height = img.height
-            original_ratio = original_width / original_height
-            target_ratio = target_width / target_height
-            if original_ratio > target_ratio:
-                img.width = target_width
-                img.height = target_width / original_ratio
-            else:
-                img.height = target_height
-                img.width = target_height * original_ratio
+            target_width = total_width_pixels 
+            target_height = total_height_pixels 
+            img.width = target_width
+            img.height = target_height
             min_size = 50
             if img.width < min_size or img.height < min_size:
                 img.width = max(img.width, min_size)
                 img.height = max(img.height, min_size)
-            ws.add_image(img, 'A4')
+            ws.add_image(img, 'B4')
         except Exception:
-            ws['A4'] = '[Image not found]'
-            ws['A4'].font = normal_font
-            ws['A4'].alignment = center_align
+            ws['B4'] = '[Image not found]'
+            ws['B4'].font = normal_font
+            ws['B4'].alignment = center_align
     else:
         ws['A3'] = ''
         ws['A3'].alignment = center_align
@@ -484,67 +481,67 @@ def create_ksd_detail_sheet(
     tel = contact_info.get('tel') or contact_defaults['tel']
     fax = contact_info.get('fax') or contact_defaults['fax']
 
-    ws['C3'] = f"Sales: {contact_name}"
-    ws['C3'].font = normal_font
-    ws['C3'].alignment = center_align
-    ws['D3'] = 'Installation Angle'
+    ws['D3'] = f"Sales: {contact_name}"
     ws['D3'].font = normal_font
     ws['D3'].alignment = center_align
-    ws['E3'] = normalize_angle(angle_val)
+    ws['E3'] = 'Installation Angle'
     ws['E3'].font = normal_font
     ws['E3'].alignment = center_align
-    ws['F3'] = 'Panel Size'
+    ws['F3'] = normalize_angle(angle_val)
     ws['F3'].font = normal_font
     ws['F3'].alignment = center_align
+    ws['G3'] = 'Panel Size'
+    ws['G3'].font = normal_font
+    ws['G3'].alignment = center_align
 
-    ws['C4'] = f"Phone: {phone}"
-    ws['C4'].font = normal_font
-    ws['C4'].alignment = center_align
-    ws['D4'] = 'Max Wind Load'
+    ws['D4'] = f"Phone: {phone}"
     ws['D4'].font = normal_font
     ws['D4'].alignment = center_align
-    ws['E4'] = matrix_max_wind or ''
+    ws['E4'] = 'Max Wind Load'
     ws['E4'].font = normal_font
     ws['E4'].alignment = center_align
-    ws['F4'] = 'Power/PC'
+    ws['F4'] = matrix_max_wind or ''
     ws['F4'].font = normal_font
     ws['F4'].alignment = center_align
-    ws['G4'] = f"{matrix_module_watt}w" if matrix_module_watt else ''
+    ws['G4'] = 'Power/PC'
     ws['G4'].font = normal_font
     ws['G4'].alignment = center_align
+    ws['H4'] = f"{matrix_module_watt}w" if matrix_module_watt else ''
+    ws['H4'].font = normal_font
+    ws['H4'].alignment = center_align
 
-    ws['C5'] = f"Email: {tel}"
-    ws['C5'].font = normal_font
-    ws['C5'].alignment = center_align
-    ws['D5'] = 'Max Snow Load'
+    ws['D5'] = f"Email: {tel}"
     ws['D5'].font = normal_font
     ws['D5'].alignment = center_align
-    ws['E5'] = matrix_max_snow or ''
+    ws['E5'] = 'Max Snow Load'
     ws['E5'].font = normal_font
     ws['E5'].alignment = center_align
-    ws['F5'] = 'Total Output'
+    ws['F5'] = matrix_max_snow or ''
     ws['F5'].font = normal_font
     ws['F5'].alignment = center_align
-    ws['G5'] = f"{matrix_output_wp} Wp" if matrix_output_wp else ''
+    ws['G5'] = 'Total Output'
     ws['G5'].font = normal_font
     ws['G5'].alignment = center_align
+    ws['H5'] = f"{matrix_output_wp} Wp" if matrix_output_wp else ''
+    ws['H5'].font = normal_font
+    ws['H5'].alignment = center_align
 
     missing_boards_val = matrix_data.get('missing_per_table', 0) or 0
     if missing_boards_val == 0:
         _raw_mb = int((config or {}).get('missing_boards', 0) or 0)
         missing_boards_val = -_raw_mb if _raw_mb > 0 else _raw_mb
-    ws['C6'] = 'Missing Modules'
-    ws['C6'].font = normal_font
-    ws['C6'].alignment = center_align
-    ws['D6'] = str(missing_boards_val) if missing_boards_val != 0 else '/'
+    ws['D6'] = 'Missing Modules'
     ws['D6'].font = normal_font
     ws['D6'].alignment = center_align
-    ws['F6'] = 'Span(E/W)'
-    ws['F6'].font = normal_font
-    ws['F6'].alignment = center_align
-    ws['G6'] = f"{span_info} mm" if span_info else ''
+    ws['E6'] = str(missing_boards_val) if missing_boards_val != 0 else '/'
+    ws['E6'].font = normal_font
+    ws['E6'].alignment = center_align
+    ws['G6'] = 'Span(E/W)'
     ws['G6'].font = normal_font
     ws['G6'].alignment = center_align
+    ws['H6'] = f"{span_info} mm" if span_info else ''
+    ws['H6'].font = normal_font
+    ws['H6'].alignment = center_align
 
     if matrix_module_size:
         panel_spec = re.sub(r'[-×xX]', '*', str(matrix_module_size))
@@ -552,39 +549,39 @@ def create_ksd_detail_sheet(
             panel_spec = panel_spec + 'mm'
     else:
         panel_spec = (config or {}).get('panel_spec', '') if config else ''
-    ws['G3'] = panel_spec
-    ws['G3'].font = normal_font
-    ws['G3'].alignment = center_align
-
-    ws['C7'] = 'Array'
-    ws['C7'].font = normal_font
-    ws['C7'].alignment = center_align
-    if rows is not None:
-        ws['D7'] = f"{rows} Row"
-    else:
-        ws['D7'] = ''
-    if cols is not None:
-        ws['E7'] = f"{cols} Col"
-    else:
-        ws['E7'] = ''
-    ws['D7'].alignment = center_align
-    ws['E7'].alignment = center_align
-    ws['D7'].font = normal_font
-    ws['E7'].font = normal_font
-    ws['F7'] = 'Tables'
-    ws['F7'].font = normal_font
-    ws['F7'].alignment = center_align
-    if matrix_set_count:
-        ws['G7'] = matrix_set_count
-    else:
-        ws['G7'] = ''
-    ws['G7'].font = normal_font
-    ws['G7'].alignment = center_align
-
-    ws.merge_cells(f'H3:{max_col_letter}7')
-    ws['H3'] = '10 years warranty\n20 years service life'
+    ws['H3'] = panel_spec
     ws['H3'].font = normal_font
     ws['H3'].alignment = center_align
+
+    ws['D7'] = 'Array'
+    ws['D7'].font = normal_font
+    ws['D7'].alignment = center_align
+    if rows is not None:
+        ws['E7'] = f"{rows} Row"
+    else:
+        ws['E7'] = ''
+    if cols is not None:
+        ws['F7'] = f"{cols} Col"
+    else:
+        ws['F7'] = ''
+    ws['E7'].alignment = center_align
+    ws['F7'].alignment = center_align
+    ws['E7'].font = normal_font
+    ws['F7'].font = normal_font
+    ws['G7'] = 'Tables'
+    ws['G7'].font = normal_font
+    ws['G7'].alignment = center_align
+    if matrix_set_count:
+        ws['H7'] = matrix_set_count
+    else:
+        ws['H7'] = ''
+    ws['H7'].font = normal_font
+    ws['H7'].alignment = center_align
+
+    ws.merge_cells(f'I3:{max_col_letter}7')
+    ws['I3'] = '10 years warranty\n20 years service life'
+    ws['I3'].font = normal_font
+    ws['I3'].alignment = center_align
 
     ws.merge_cells(f'A8:{max_col_letter}8')
 
@@ -633,8 +630,7 @@ def create_ksd_detail_sheet(
                 pi = resolve_price_info(price_mapping, p.get('code', ''), spec=p.get('spec', ''))
                 p['_price_info'] = pi
             if not pi or not has_valid_price_info(pi):
-                is_complex = True
-                break
+                continue
             cat = _get_discount_category(pi, p)
             if cat != 'standard':
                 is_complex = True
@@ -663,18 +659,19 @@ def create_ksd_detail_sheet(
             row_price_info_map[row] = price_info
 
             _set_cell(ws, row, 1, f'=ROW()-{start_row - 1}', font=normal_font, align=center_align, border=thin_border)
-            _set_cell(ws, row, 2, en_name, font=normal_font, align=center_align, border=thin_border)
+            ws.merge_cells(f'A{row}:B{row}')
+            _set_cell(ws, row, 3, en_name, font=normal_font, align=center_align, border=thin_border)
             _raw_mat = (price_info.get('db_material') if price_info and price_info.get('db_material') else None) or product['material']
-            _set_cell(ws, row, 3, adjust_material_by_coating(translate_material(_raw_mat, 'ko'), coating_thickness),
+            _set_cell(ws, row, 4, adjust_material_by_coating(translate_material(_raw_mat, 'ko'), coating_thickness),
                       font=normal_font, align=center_align, border=thin_border)
-            _set_cell(ws, row, 4, "", font=normal_font, align=center_align, border=thin_border)
+            _set_cell(ws, row, 5, "", font=normal_font, align=center_align, border=thin_border)
             try:
                 _spec_num = float(product['spec'])
-                _set_cell(ws, row, 5, _spec_num,
+                _set_cell(ws, row, 6, _spec_num,
                           font=normal_font, align=center_align, border=thin_border)
-                ws.cell(row=row, column=5).number_format = '"L"!=#"mm"'
+                ws.cell(row=row, column=6).number_format = '"L"!=#"mm"'
             except (ValueError, TypeError):
-                _set_cell(ws, row, 5, _strip_cjk_spec(product['spec']),
+                _set_cell(ws, row, 6, _strip_cjk_spec(product['spec']),
                           font=normal_font, align=center_align, border=thin_border)
 
             unit_price = 0
@@ -683,7 +680,7 @@ def create_ksd_detail_sheet(
             is_matched = False
 
             if price_info and has_valid_price_info(price_info):
-                unit_price = float(price_info['price'])
+                unit_price = get_temp_base_price(price_info, product, '韩语组', sale_type)
                 price_unit = price_info.get('unit', '')
                 matched_count += 1
                 is_matched = True
@@ -696,6 +693,7 @@ def create_ksd_detail_sheet(
                         'spec': product.get('spec', ''),
                         'quantity': product.get('quantity', 0),
                         'unit': price_info.get('unit', '') if price_info else '',
+                        'preinstall': normalize_preinstall(product.get('preinstall')),
                         'issue_reason': '数据库无法匹配',
                     })
 
@@ -707,30 +705,31 @@ def create_ksd_detail_sheet(
                 display_unit_price = float(Decimal(str(unit_price)) * length_mm / Decimal('1000'))
             else:
                 display_unit_price = unit_price
+            display_unit_price = apply_temp_preinstall_adjustment(price_info, display_unit_price, product, '韩语组', sale_type)
 
             if display_unit_price > 0:
                 if is_complex and is_matched:
                     cat = _get_discount_category(price_info, product)
                     rate = _get_discount_rate(cat, ko_discount_rate, ko_steel_discount_rate, ko_purchased_discount_rate)
                     factor = rate / 100.0
-                    _set_cell(ws, row, 6, f"={display_unit_price}*{factor}",
+                    _set_cell(ws, row, 7, f"={display_unit_price}*{factor}",
                               font=normal_font, align=center_align, border=thin_border,
                               number_format=currency_number_format)
                 else:
-                    _set_cell(ws, row, 6, float(display_unit_price),
+                    _set_cell(ws, row, 7, float(display_unit_price),
                               font=normal_font, align=center_align, border=thin_border,
                               number_format=currency_number_format)
             else:
-                _set_cell(ws, row, 6, "",
+                _set_cell(ws, row, 7, "",
                           font=normal_font, align=center_align, border=thin_border,
                           number_format=currency_number_format)
 
             quantity = product['quantity']
             if quantity > 0:
-                _set_cell(ws, row, 7, int(quantity) if quantity % 1 == 0 else quantity,
+                _set_cell(ws, row, 8, int(quantity) if quantity % 1 == 0 else quantity,
                           font=normal_font, align=center_align, border=thin_border)
             else:
-                _set_cell(ws, row, 7, "",
+                _set_cell(ws, row, 8, "",
                           font=normal_font, align=center_align, border=thin_border)
 
             total_price = Decimal('0')
@@ -740,7 +739,7 @@ def create_ksd_detail_sheet(
                     cat = _get_discount_category(price_info, product)
                     rate = _get_discount_rate(cat, ko_discount_rate, ko_steel_discount_rate, ko_purchased_discount_rate)
                     total_price = total_price * Decimal(str(rate)) / Decimal('100')
-                _set_cell(ws, row, 8, f"=F{row}*G{row}",
+                _set_cell(ws, row, 9, f"=G{row}*H{row}",
                           font=normal_font, align=center_align, border=thin_border,
                           number_format=currency_number_format)
                 sub_total_price += total_price
@@ -758,15 +757,15 @@ def create_ksd_detail_sheet(
                     inquiry_rows.append(row)
                     inquiry_price_sum += total_price
             else:
-                _set_cell(ws, row, 8, f"=F{row}*G{row}",
+                _set_cell(ws, row, 9, f"=G{row}*H{row}",
                           font=normal_font, align=center_align, border=thin_border,
                           number_format=currency_number_format)
                 if not is_matched:
                     unmatched_rows.append(row)
 
-            remark_col = 10 if need_weight_code else 9
+            remark_col = 11 if need_weight_code else 10
             if need_weight_code:
-                weight_cell = ws.cell(row=row, column=9)
+                weight_cell = ws.cell(row=row, column=10)
                 unit_weight = None
                 if price_info:
                     db_w = parse_decimal_number(price_info.get('db_weight'))
@@ -827,91 +826,92 @@ def create_ksd_detail_sheet(
 
     def _write_group_header(ws, row):
         group_headers = [
-            ('Item No.', 'A'), ('Product Name', 'B'), ('Material', 'C'),
-            ('Picture', 'D'), ('Spec.', 'E'),
-            (f'Unit Price ({currency_label})\nEX Works', 'F'),
-            (f'QTY (PCS)', 'G'),
-            (f'Total Price ({currency_label})\nEX Works', 'H'),
-            ('Remark', 'J' if need_weight_code else 'I')
+            ('Item No.', 'A'), ('Product Name', 'C'), ('Material', 'D'),
+            ('Picture', 'E'), ('Spec.', 'F'),
+            (f'Unit Price ({currency_label})\nEX Works', 'G'),
+            (f'QTY (PCS)', 'H'),
+            (f'Total Price ({currency_label})\nEX Works', 'I'),
+            ('Remark', 'K' if need_weight_code else 'J')
         ]
         if need_weight_code:
-            group_headers.insert(-1, ('Weight(KG)', 'I'))
+            group_headers.insert(-1, ('Weight(KG)', 'J'))
         green_fill = PatternFill(start_color='98FFEE', end_color='98FFEE', fill_type='solid')
+        ws.merge_cells(f'A{row}:B{row}')
         for text, col in group_headers:
             cell = ws[f'{col}{row}']
             cell.value = text
             cell.font = header_font
             cell.alignment = center_align
             cell.border = thin_border
-            if need_weight_code and col == 'I':
+            if need_weight_code and col == 'J':
                 cell.fill = green_fill
         for c in range(1, max_col + 1):
             ws.cell(row=row, column=c).border = thin_border
 
     def _write_group_totals(ws, row, sub_total, total_all, kw, sub_weight=0, total_weight=0, data_first_row=None, data_last_row=None):
         ws.row_dimensions[row].height = 40
-        ws.merge_cells(f'A{row}:G{row}')
+        ws.merge_cells(f'A{row}:H{row}')
         ws[f'A{row}'] = 'TOTAL AMOUNT/TABLE'
         ws[f'A{row}'].font = small_bold_font
         ws[f'A{row}'].alignment = right_align
         if data_first_row and data_last_row and data_last_row >= data_first_row:
-            ws.cell(row=row, column=8, value=f'=SUM(H{data_first_row}:H{data_last_row})')
+            ws.cell(row=row, column=9, value=f'=SUM(I{data_first_row}:I{data_last_row})')
         else:
-            ws.cell(row=row, column=8, value=sub_total)
-        ws.cell(row=row, column=8).number_format = currency_number_format
-        ws.cell(row=row, column=8).font = small_bold_font
-        ws.cell(row=row, column=8).alignment = center_align
+            ws.cell(row=row, column=9, value=sub_total)
+        ws.cell(row=row, column=9).number_format = currency_number_format
+        ws.cell(row=row, column=9).font = small_bold_font
+        ws.cell(row=row, column=9).alignment = center_align
         if need_weight_code:
             if data_first_row and data_last_row and data_last_row >= data_first_row:
-                ws.cell(row=row, column=9, value=f'=SUMPRODUCT(I{data_first_row}:I{data_last_row},G{data_first_row}:G{data_last_row})')
+                ws.cell(row=row, column=10, value=f'=SUMPRODUCT(J{data_first_row}:J{data_last_row},H{data_first_row}:H{data_last_row})')
             else:
-                ws.cell(row=row, column=9, value=round(sub_weight, 2))
-            ws.cell(row=row, column=9).number_format = '#,##0.00'
-            ws.cell(row=row, column=9).font = small_bold_font
-            ws.cell(row=row, column=9).alignment = center_align
+                ws.cell(row=row, column=10, value=round(sub_weight, 2))
+            ws.cell(row=row, column=10).number_format = '#,##0.00'
+            ws.cell(row=row, column=10).font = small_bold_font
+            ws.cell(row=row, column=10).alignment = center_align
         for c in range(1, max_col + 1):
             ws.cell(row=row, column=c).border = thin_border
 
         sub_total_row = row
         row += 1
         ws.row_dimensions[row].height = 40
-        ws.merge_cells(f'A{row}:G{row}')
+        ws.merge_cells(f'A{row}:H{row}')
         total_label = f'TOTAL AMOUNT OF {total_table_count} TABLES' if total_table_count > 1 else 'TOTAL AMOUNT OF ALL TABLES'
         ws[f'A{row}'] = total_label
         ws[f'A{row}'].font = small_bold_font
         ws[f'A{row}'].alignment = right_align
         if total_table_count > 1:
-            ws.cell(row=row, column=8, value=f'=H{sub_total_row}*G7')
+            ws.cell(row=row, column=9, value=f'=I{sub_total_row}*H7')
         else:
-            ws.cell(row=row, column=8, value=f'=H{sub_total_row}')
-        ws.cell(row=row, column=8).number_format = currency_number_format
-        ws.cell(row=row, column=8).font = small_bold_font
-        ws.cell(row=row, column=8).alignment = center_align
+            ws.cell(row=row, column=9, value=f'=I{sub_total_row}')
+        ws.cell(row=row, column=9).number_format = currency_number_format
+        ws.cell(row=row, column=9).font = small_bold_font
+        ws.cell(row=row, column=9).alignment = center_align
         if need_weight_code:
             if total_table_count > 1:
-                ws.cell(row=row, column=9, value=f'=I{sub_total_row}*G7')
+                ws.cell(row=row, column=10, value=f'=J{sub_total_row}*H7')
             else:
-                ws.cell(row=row, column=9, value=f'=I{sub_total_row}')
-            ws.cell(row=row, column=9).number_format = '#,##0.00'
-            ws.cell(row=row, column=9).font = small_bold_font
-            ws.cell(row=row, column=9).alignment = center_align
+                ws.cell(row=row, column=10, value=f'=J{sub_total_row}')
+            ws.cell(row=row, column=10).number_format = '#,##0.00'
+            ws.cell(row=row, column=10).font = small_bold_font
+            ws.cell(row=row, column=10).alignment = center_align
         for c in range(1, max_col + 1):
             ws.cell(row=row, column=c).border = thin_border
 
         all_tables_row = row
         row += 1
         ws.row_dimensions[row].height = 40
-        ws.merge_cells(f'A{row}:G{row}')
+        ws.merge_cells(f'A{row}:H{row}')
         ws[f'A{row}'] = f'{currency_label}/W'
         ws[f'A{row}'].font = small_bold_font
         ws[f'A{row}'].alignment = right_align
         if kw and kw > 0:
-            ws.cell(row=row, column=8, value=f'=H{all_tables_row}/({kw}*1000)')
+            ws.cell(row=row, column=9, value=f'=I{all_tables_row}/({kw}*1000)')
         else:
-            ws.cell(row=row, column=8, value=0)
-        ws.cell(row=row, column=8).number_format = '#,##0.000'
-        ws.cell(row=row, column=8).font = small_bold_font
-        ws.cell(row=row, column=8).alignment = center_align
+            ws.cell(row=row, column=9, value=0)
+        ws.cell(row=row, column=9).number_format = '#,##0.000'
+        ws.cell(row=row, column=9).font = small_bold_font
+        ws.cell(row=row, column=9).alignment = center_align
         for c in range(1, max_col + 1):
             ws.cell(row=row, column=c).border = thin_border
 
@@ -982,7 +982,7 @@ def create_ksd_detail_sheet(
 
     # ========== Insert images ==========
     def mark_missing_image(row_number):
-        image_cell = ws.cell(row=row_number, column=IMAGE_COLUMN_INDEX)
+        image_cell = ws.cell(row=row_number, column=image_col_index)
         image_cell.value = "/"
         image_cell.alignment = center_align
         image_cell.font = normal_font
@@ -1003,14 +1003,14 @@ def create_ksd_detail_sheet(
             img_path = code_to_images[normalized_code][0]
 
         if img_path and image_folder:
-            fit_w, fit_h = _fit_image_to_cell(ws, row, IMAGE_COLUMN_INDEX, IMAGE_WIDTH, IMAGE_HEIGHT)
+            fit_w, fit_h = _fit_image_to_cell(ws, row, image_col_index, IMAGE_WIDTH, IMAGE_HEIGHT)
             temp_img_path = prepare_image_for_excel(
                 img_path, target_width=fit_w, target_height=fit_h,
                 temp_dir=image_temp_dir, cache=image_cache
             )
             final_img_path = temp_img_path if temp_img_path else img_path
             success = add_image_centered_in_cell(
-                ws, final_img_path, row, IMAGE_COLUMN_INDEX,
+                ws, final_img_path, row, image_col_index,
                 img_width=fit_w, img_height=fit_h
             )
             if success:
@@ -1026,12 +1026,7 @@ def create_ksd_detail_sheet(
 
     grand_total = part1_total_all + part3_total_all
 
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.75, bottom=0.75, left=0.7, right=0.7, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'ko_simple')
 
     if unmatched_products_list is not None:
         for _up in local_unmatched:
@@ -1081,6 +1076,7 @@ def create_ksd_detail_sheet(
         'image_found_count': image_found_count,
         'image_not_found_count': image_not_found_count,
         'pile_products': pile_products,
+        'all_render_products': all_render_products,
         'sub_total_row': last_data_row,
         'total_row': last_data_row,
         'detail_data_end_row': last_data_row,
@@ -1208,6 +1204,7 @@ def create_ksd_summary_sheet(
     ws['H9'] = 'Fanghu North 2nd Rd, Huli Dist, Xiamen, Fujian, China'
     ws['H9'].font = normal_font
     ws['H9'].alignment = left_bottom
+    ws.row_dimensions[9].height = 25
 
     part1_total_all = Decimal('0')
     part1_per_table = Decimal('0')
@@ -1252,7 +1249,7 @@ def create_ksd_summary_sheet(
     _disc_p1_row = _total_row + 1
     _perw_row = _disc_p1_row + 1
 
-    for r in range(5, 12):
+    for r in range(5, 11):
         for c in range(1, 7):
             ws.cell(row=r, column=c).border = bottom_border
 
@@ -1391,7 +1388,7 @@ def create_ksd_summary_sheet(
             ws.cell(row=r, column=7, value=r_kw).alignment = center
             ws.merge_cells(f'G{r}:H{r}')
             if detail_sheet and p1_total_table_row:
-                ws.cell(row=r, column=9, value=f"='{detail_sheet}'!H{p1_total_table_row}").number_format = ksd_currency_fmt
+                ws.cell(row=r, column=9, value=f"='{detail_sheet}'!I{p1_total_table_row}").number_format = ksd_currency_fmt
             else:
                 ws.cell(row=r, column=9, value=qr.get('part1_price_per_table', 0)).number_format = ksd_currency_fmt
             ws.cell(row=r, column=9).alignment = center
@@ -1644,12 +1641,7 @@ def create_ksd_summary_sheet(
         name='Calibri', size=12, color='FF0000')
     ws.cell(row=hint_row, column=1).alignment = left_bottom
 
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.75, bottom=0.75, left=0.7, right=0.7, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'ko_simple')
 
     sheet_names = workbook.sheetnames
     if 'Total' in sheet_names:

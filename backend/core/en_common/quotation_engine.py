@@ -79,6 +79,7 @@ from backend.core.shared.image_utils import (
 )
 from backend.core.material_translate import translate_material, adjust_material_by_coating
 from backend.core.shared.translations import t as _t
+from backend.core.print_settings import apply_print_setup
 
 CURRENCY_FMT = '#,##0.00'
 BLUE_FILL = PatternFill(patternType='solid', fgColor=Color(theme=3, tint=0.6))
@@ -500,12 +501,7 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
 
     print(f"   [EN-COMMON] Images: found={image_found_count}, not_found={image_not_found_count}")
 
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.5, bottom=0.5, left=0.25, right=0.25, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'en_common')
 
     if unmatched_products_out is not None:
         for _up in local_unmatched:
@@ -838,14 +834,7 @@ def create_total_materials_sheet(workbook, all_quotation_results, price_mapping=
         ws.cell(row=total_row_num, column=col_amount).number_format = CURRENCY_FMT
         ws.row_dimensions[total_row_num].height = 28
 
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-
-    from openpyxl.worksheet.page import PageMargins
-    ws.page_margins = PageMargins(top=0.5, bottom=0.5, left=0.4, right=0.4, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'en_common', 'en_common_total_materials')
 
     print(f"   [EN-COMMON] Total materials sheet created ({len(sorted_items)} items)")
     return ws.title
@@ -1454,12 +1443,7 @@ def create_summary_sheet(
         except Exception:
             pass
 
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.5, bottom=0.5, left=0.25, right=0.25, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'en_common')
 
     sheet_names = workbook.sheetnames
     localized_title = _t('common_summary_title', lang)

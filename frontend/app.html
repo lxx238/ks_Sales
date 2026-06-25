@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="css/cad.css">
   <link rel="stylesheet" href="css/layout.css">
   <link rel="stylesheet" href="css/logistics.css">
+  <link rel="stylesheet" href="css/schedule.css">
 </head>
 <body>
   <div class="app-shell">
@@ -36,7 +37,10 @@
           <a class="btn" data-nav-group="韩语组">韩语组</a>
           <a class="btn" data-nav-group="英语组">英语组</a>
           <a class="btn" data-nav-group="日语组">日语组</a>
+          <a class="btn" data-nav-group="亚太组">亚太组</a>
           <a class="btn" data-nav-group="物流组">物流组</a>
+          <a class="btn" data-nav-group="人事组">人事组</a>
+          <a class="btn" data-nav-group="设计组">设计组</a>
         </div>
         <nav class="sidebar-nav">
           <span class="sidebar-label">功能导航</span>
@@ -45,12 +49,14 @@
           <a class="btn" href="#" data-nav-page="cad">CAD 阵列助手</a>
           <a class="btn" href="#" data-nav-page="database">数据库显示</a>
           <a class="btn" href="#" data-nav-page="records">申请记录</a>
-          <a class="btn" href="#" data-nav-page="email-mgmt">询价-邮箱管理</a>
+          <a class="btn" href="#" data-nav-page="email-mgmt">询价价格查询</a>
           <a class="btn" href="#" data-nav-page="image-inquiry">询图-邮箱管理</a>
           <a class="btn" href="#" data-nav-page="temp-price">临时价格设置</a>
-          <a class="btn" href="#" data-nav-page="temp-price-query">临时价格查询</a>
+          <a class="btn" href="#" data-nav-page="temp-price-db">临时数据查询</a>
+          <a class="btn" href="#" data-nav-page="temp-price-query">固定物料价格查询</a>
           <a class="btn" href="#" data-nav-page="questions">问答中心</a>
           <a class="btn" href="#" data-nav-page="logistics">物流排柜汇总</a>
+          <a class="btn" href="#" data-nav-page="schedule">总助日程提醒</a>
           <a class="btn" href="#" data-nav-page="dashboard">人员使用情况大屏</a>
         </nav>
         <nav class="sidebar-nav" id="admin-nav" style="display:none;">
@@ -68,6 +74,7 @@
               <div class="user-role" id="user-role-pill">角色</div>
               <div class="user-name" id="user-name-pill">用户</div>
             </div>
+            <button class="btn small" id="my-settings-btn" title="打印/页面习惯设置">⚙️ 个人设置</button>
             <button class="btn small" id="logout-btn-pill">退出</button>
           </div>
         </div>
@@ -94,18 +101,21 @@
   <script src="js/accounts.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/router.js"></script>
-  <script src="js/pages/quotation.js"></script>
+  <script src="js/pages/quotation.js?v=20260625c"></script>
   <script src="js/pages/fence_gate.js"></script>
   <script src="js/pages/est_fence.js"></script>
   <script src="js/pages/cad.js"></script>
   <script src="js/pages/aluminum.js"></script>
-  <script src="js/pages/email_management.js"></script>
+  <script src="js/pages/email_management.js?v=20260625b"></script>
   <script src="js/pages/image_inquiry.js"></script>
   <script src="js/pages/question.js"></script>
-  <script src="js/pages/temp_price.js"></script>
+  <script src="js/pages/temp_price.js?v=20260625b"></script>
+  <script src="js/pages/temp_price_db.js"></script>
   <script src="js/pages/temp_price_query.js"></script>
   <script src="js/pages/dashboard.js"></script>
   <script src="js/pages/logistics.js"></script>
+  <script src="js/pages/schedule.js"></script>
+  <script src="js/pages/print_settings.js"></script>
   <script>
     KSRouter.register('quotation', window.QuotationPage);
     KSRouter.register('fencegate', window.FenceGatePage);
@@ -122,9 +132,12 @@
     KSRouter.register('image-inquiry', window.ImageInquiryPage);
     KSRouter.register('questions', window.QuestionPage);
     KSRouter.register('temp-price', window.TempPricePage);
+    KSRouter.register('temp-price-db', window.TempPriceDbPage);
     KSRouter.register('temp-price-query', window.TempPriceQueryPage);
     KSRouter.register('dashboard', window.DashboardPage);
     KSRouter.register('logistics', window.LogisticsPage);
+    KSRouter.register('schedule', window.SchedulePage);
+    KSRouter.register('print-settings', window.PrintSettingsPage);
 
     document.addEventListener('DOMContentLoaded', async () => {
       const authPromise = window.ksAuthSyncPromise;
@@ -152,7 +165,7 @@
       if (nameEl) nameEl.textContent = auth.username;
 
       if (!isAdmin) {
-        const allowed = auth.role === 'admin' || auth.role === '业务助理' || auth.group === group;
+        const allowed = auth.role === 'admin' || auth.role === '业务助理' || auth.role === '总助' || auth.group === group;
         if (!allowed) {
           const params = new URLSearchParams();
           params.set('group', auth.group || '');
@@ -163,7 +176,7 @@
       }
 
       const heroTitle = document.getElementById('hero-title');
-      if (heroTitle) heroTitle.textContent = group === '物流组' ? `${group} 智能汇总单生成器` : `${group} BOM智能报价系统`;
+      if (heroTitle) heroTitle.textContent = group === '人事组' ? '人事组 · 总助日程提醒' : (group === '物流组' ? `${group} 智能汇总单生成器` : (group === '设计组' ? '设计组 · 价格管理' : `${group} BOM智能报价系统`));
 
       const adminNav = document.getElementById('admin-nav');
       const adminLink = document.getElementById('admin-link');
@@ -172,18 +185,25 @@
         if (adminLink) adminLink.style.display = '';
       }
 
-      const isLogisticsGroup = group === '物流组';
-      if (isLogisticsGroup) {
+      const SINGLE_FEATURE_GROUPS = { '物流组': 'logistics', '人事组': 'schedule' };
+      const DESIGN_FEATURES = ['email-mgmt', 'image-inquiry', 'temp-price', 'temp-price-db', 'temp-price-query'];
+      const activeFeature = SINGLE_FEATURE_GROUPS[group] || '';
+      const isDesignGroup = group === '设计组';
+      const isSpecialGroup = !!activeFeature || isDesignGroup;
+      const allowedFeatures = isDesignGroup ? DESIGN_FEATURES : (activeFeature ? [activeFeature] : null);
+      if (isSpecialGroup) {
         document.querySelectorAll('[data-nav-page]').forEach(el => {
-          if (el.getAttribute('data-nav-page') !== 'logistics') {
+          const pg = el.getAttribute('data-nav-page');
+          if (!allowedFeatures || !allowedFeatures.includes(pg)) {
             el.style.display = 'none';
           }
         });
       } else {
-        const logisticsNav = document.querySelector('[data-nav-page="logistics"]');
-        if (logisticsNav) logisticsNav.style.display = 'none';
+        document.querySelectorAll('[data-nav-page="logistics"], [data-nav-page="schedule"]').forEach(el => {
+          el.style.display = 'none';
+        });
       }
-      if (!isAdmin && !isLogisticsGroup) {
+      if (!isAdmin && !isSpecialGroup) {
         const perms = auth.permissions || [];
         const permPageMap = {
           'quotation': '[data-nav-page="quotation"]',
@@ -191,28 +211,37 @@
           'cad': '[data-nav-page="cad"]',
           'database': '[data-nav-page="database"]',
           'records': '[data-nav-page="records"]',
-          'email-mgmt': '[data-nav-page="email-mgmt"]',
           'image-inquiry': '[data-nav-page="image-inquiry"]',
           'questions': '[data-nav-page="questions"]',
           'temp-price': '[data-nav-page="temp-price"]',
+          'temp-price-db': '[data-nav-page="temp-price-db"]',
           'temp-price-query': '[data-nav-page="temp-price-query"]',
+          'schedule': '[data-nav-page="schedule"]',
         };
         Object.entries(permPageMap).forEach(([perm, selector]) => {
           const el = document.querySelector(selector);
-          const allowed = perm === 'fencegate' || perm === 'email-mgmt' || perm === 'image-inquiry'
+          const allowed = perm === 'fencegate'
+            ? (perms.includes('quotation') && group !== '亚太组')
+            : (perm === 'image-inquiry' || perm === 'temp-price-query'
+            || perm === 'temp-price-db'
             ? perms.includes('quotation')
-            : perms.includes(perm);
+            : perms.includes(perm));
           if (el && !allowed) {
             el.style.display = 'none';
           }
         });
+        // 询价价格查询（询价填价）：admin / 设计组 / 拥有 quotation 权限者可见（业务员可查看；吨价填写仅 admin/设计组）
+        const inquiryPricingEl = document.querySelector('[data-nav-page="email-mgmt"]');
+        if (inquiryPricingEl && auth.group !== '设计组' && !perms.includes('quotation')) {
+          inquiryPricingEl.style.display = 'none';
+        }
       }
 
       document.querySelectorAll('[data-nav-group]').forEach(el => {
         const g = el.getAttribute('data-nav-group');
-        if (isLogisticsGroup && g !== '物流组' && !isAdmin) {
+        if (isSpecialGroup && g !== group && !isAdmin) {
           el.style.display = 'none';
-        } else if (!isLogisticsGroup && g === '物流组' && !isAdmin) {
+        } else if (!isSpecialGroup && (g === '物流组' || g === '人事组' || g === '设计组') && !isAdmin) {
           el.style.display = 'none';
         }
         el.classList.toggle('primary', g === group);
@@ -224,9 +253,15 @@
         };
       }
 
-      if (isLogisticsGroup && !isAdmin) {
+      const mySettingsBtn = document.getElementById('my-settings-btn');
+      if (mySettingsBtn) {
+        mySettingsBtn.onclick = () => KSRouter.navigate('print-settings');
+      }
+
+      if (isSpecialGroup && !isAdmin) {
         const params = new URLSearchParams(window.location.search);
-        if (!params.get('page')) params.set('page', 'logistics');
+        const defaultPage = isDesignGroup ? 'email-mgmt' : activeFeature;
+        if (!params.get('page')) params.set('page', defaultPage);
         const newUrl = `${window.location.pathname}?${params.toString()}`;
         window.history.replaceState({}, '', newUrl);
       }
@@ -243,24 +278,33 @@
           'questions': 'questions',
           'temp-price': 'temp-price',
           'logistics': 'logistics',
+          'schedule': 'schedule',
         };
         if (isAdmin) return;
         const perms = auth.permissions || [];
         const currentPage = KSRouter.currentPage;
+        const isDesign = auth.group === '设计组';
+        const designPages = ['email-mgmt', 'temp-price', 'temp-price-db', 'image-inquiry', 'temp-price-query', 'print-settings'];
+        if (isDesign) {
+          if (!designPages.includes(currentPage)) {
+            KSRouter.navigate('email-mgmt', false);
+          }
+          return;
+        }
         const permRequired = {
           quotation: 'quotation',
           fencegate: 'quotation',
           cad: 'cad',
           database: 'database',
           records: 'records',
-          'email-mgmt': 'quotation',
           'image-inquiry': 'quotation',
           questions: 'questions',
           'temp-price': 'temp-price',
           logistics: 'logistics',
         };
         const required = permRequired[currentPage];
-        if (required && !perms.includes(required)) {
+        const blockedByRole = currentPage === 'email-mgmt' && !perms.includes('quotation');
+        if ((required && !perms.includes(required)) || blockedByRole) {
           for (const perm of Object.keys(permPageMap)) {
             if (perms.includes(perm)) {
               KSRouter.navigate(permPageMap[perm], false);
@@ -274,22 +318,32 @@
       KSRouter.navigate = function(page) {
         if (!isAdmin) {
           const perms = auth.permissions || [];
-          const permRequired = {
-            quotation: 'quotation',
-            fencegate: 'quotation',
-            cad: 'cad',
-            database: 'database',
-            records: 'records',
-            'email-mgmt': 'quotation',
-            'image-inquiry': 'quotation',
-            questions: 'questions',
-            'temp-price': 'temp-price',
-            logistics: 'logistics',
-          };
-          const required = permRequired[page];
-          if (required && !perms.includes(required)) {
-            alert('您没有该功能的访问权限');
-            return;
+          const isDesign = auth.group === '设计组';
+          if (isDesign) {
+            const designAllowed = ['email-mgmt', 'temp-price', 'temp-price-db', 'image-inquiry', 'temp-price-query', 'print-settings'];
+            if (!designAllowed.includes(page)) {
+              alert('您没有该功能的访问权限');
+              return;
+            }
+          } else {
+            const permRequired = {
+              quotation: 'quotation',
+              fencegate: 'quotation',
+              cad: 'cad',
+              database: 'database',
+              records: 'records',
+              'image-inquiry': 'quotation',
+              questions: 'questions',
+              'temp-price': 'temp-price',
+              logistics: 'logistics',
+              schedule: 'schedule',
+            };
+            const required = permRequired[page];
+            if ((required && !perms.includes(required)) ||
+                (page === 'email-mgmt' && !perms.includes('quotation'))) {
+              alert('您没有该功能的访问权限');
+              return;
+            }
           }
         }
         originalNavigate(page);

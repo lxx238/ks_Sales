@@ -107,6 +107,9 @@ HEADER_FIELD_RULES = {
     '备注': {
         'include': ['备注', 'remark', 'notes'],
     },
+    '预装情况': {
+        'include': ['预装'],
+    },
 }
 
 
@@ -600,6 +603,7 @@ def read_bom_from_dataframe(df):
         weight = row.get('单重', None)
         array_val = row.get('阵列', None)
         span_val = row.get('跨距', None)
+        preinstall = row.get('预装情况', None)
 
         if array_val and array_val != '' and array_info is None:
             array_info = str(array_val)
@@ -653,6 +657,7 @@ def read_bom_from_dataframe(df):
             'weight': weight_decimal,
             'weight_has_unit': weight_has_unit,
             'weight_unit': weight_unit,
+            'preinstall': str(preinstall).strip() if preinstall and str(preinstall).lower() != 'nan' else '',
             '_source_row': row.get('_orig_row', idx),
         }
         products.append(product)
@@ -786,7 +791,7 @@ def extract_bom_dataframe(df, bom_info, index, all_bom_starts, total_rows, colum
                 continue
 
             filtered_row = {}
-            for standard_col in ['编码', '名称', '规格', '材质', '数量', '备注', '单重']:
+            for standard_col in ['编码', '名称', '规格', '材质', '数量', '备注', '单重', '预装情况']:
                 if standard_col in normalized_mapping:
                     col_idx = normalized_mapping[standard_col]
                     if col_idx < len(row):

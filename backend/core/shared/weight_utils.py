@@ -166,6 +166,55 @@ def calculate_report_total_weight(product, quantity, price_info, row_number=None
     return total_weight, False, ''
 
 
+def lookup_unit_weight_from_material_db(code, spec, bom_weight=0):
+    """查询物料库单重并按规格折算（长度属性按 米重×长度/1000）。
+
+    查不到时回退使用 BOM 自带单重。返回 float 或 None。
+    """
+    try:
+        from backend.repositories.material_repository import fetch_material_rows
+        from backend.utils.converters import normalize_lookup_code as _norm
+    except Exception:
+        fetch_material_rows = None
+        _norm = None
+
+    norm = _norm(code) if _norm else None
+
+    db_weight = 0.0
+    attr = ''
+    if norm and fetch_material_rows:
+        try:
+            rows = fetch_material_rows([norm], include_images=False)
+        except Exception:
+            rows = []
+        for row in rows:
+            row_norm = _norm(row.get('工程编码') or '') if _norm else None
+            if row_norm and row_norm != norm:
+                continue
+            try:
+                db_weight = float(str(row.get('重量') or '').replace(',', '').strip() or 0) or 0.0
+            except (TypeError, ValueError):
+                db_weight = 0.0
+            attr = str(row.get('编码属性') or '').strip().upper()
+            break
+
+    unit_weight = db_weight
+    if attr in WEIGHT_BY_LENGTH_ATTRIBUTES and db_weight:
+        length_mm = extract_length_from_spec(spec)
+        if length_mm and length_mm > 0:
+            unit_weight = round(db_weight * (length_mm / 1000.0), 4)
+        else:
+            unit_weight = 0.0
+
+    if not unit_weight:
+        try:
+            unit_weight = float(bom_weight or 0)
+        except (TypeError, ValueError):
+            unit_weight = 0.0
+
+    return unit_weight if unit_weight else None
+
+
 def calculate_report_unit_weight(product, price_info):
     if not price_info:
         bom_w = product.get('weight', 0)

@@ -1,74 +1,33 @@
 (() => {
-    const FENCE_PRICE_DB_74 = {
-        "FN01-W0101-1000": { name: "折半圆网片-74*150", price3_0: 7.0476, price3_5: 8.4476 },
-        "FN01-W0102-1000": { name: "折半圆网片-74*150(厚)", price3_0: 8.4476, price3_5: 8.4476 },
-        "FN01-W0101-1200": { name: "折半圆网片-74*150", price3_0: 7.8254, price3_5: 9.3810 },
-        "FN01-W0102-1200": { name: "折半圆网片-74*150(厚)", price3_0: 9.3810, price3_5: 9.3810 },
-        "FN01-W0101-1500": { name: "折半圆网片-74*150", price3_0: 9.0635, price3_5: 10.9365 },
-        "FN01-W0102-1500": { name: "折半圆网片-74*150(厚)", price3_0: 10.9365, price3_5: 10.9365 },
-        "FN01-W0101-1800": { name: "折半圆网片-74*150", price3_0: 10.9365, price3_5: 13.5873 },
-        "FN01-W0102-1800": { name: "折半圆网片-74*150(厚)", price3_0: 13.5873, price3_5: 13.5873 },
-        "FN01-W0101-2000": { name: "折半圆网片-74*150", price3_0: 11.5556, price3_5: 14.3651 },
-        "FN01-W0102-2000": { name: "折半圆网片-74*150(厚)", price3_0: 14.3651, price3_5: 14.3651 },
-        "FN01-L0203-1160": { name: "锁地桩圆管", spec: "38*1.5*1160", price: 3.2365 },
-        "FN01-L0204-1410": { name: "锁地桩圆管", spec: "38*1.5*1410", price: 3.7778 },
-        "FN01-L0205-1710": { name: "锁地桩圆管", spec: "38*1.5*1710", price: 4.3810 },
-        "FN01-L0206-2060": { name: "锁地桩圆管", spec: "38*1.5*2060", price: 5.0317 },
-        "FN01-L0207-2260": { name: "锁地桩圆管", spec: "38*1.5*2260", price: 5.6508 },
-        "FN01-L0103-1160": { name: "平头圆管", spec: "48*2.0*1160", price: 4.5587 },
-        "FN01-L0104-1410": { name: "平头圆管", spec: "48*2.0*1410", price: 5.3333 },
-        "FN01-L0105-1710": { name: "平头圆管", spec: "48*2.0*1710", price: 6.2698 },
-        "FN01-L0106-2060": { name: "平头圆管", spec: "48*2.0*2060", price: 7.3651 },
-        "FN01-L0107-2260": { name: "平头圆管", spec: "48*2.0*2260", price: 8.2857 },
-        "FN01-L1103-1460": { name: "削尖圆管", spec: "48*2.0*1460", price: 5.4921 },
-        "FN01-L1104-1760": { name: "削尖圆管", spec: "48*2.0*1760", price: 6.4286 },
-        "FN01-L1105-2210": { name: "削尖圆管", spec: "48*2.0*2210", price: 8.1429 },
-        "FN01-L1106-2660": { name: "削尖圆管", spec: "48*2.0*2660", price: 9.8413 },
-        "FN01-L1107-2960": { name: "削尖圆管", spec: "48*2.0*2960", price: 10.9365 },
-        "FN-PJ-0001": { name: "网扣组件", spec: "35", price: 0.2543 },
-        "FN-PJ-0003": { name: "M6x70弯钩螺栓组件", spec: "M6x70", price: 0.1567 },
-        "XJ-0017": { name: "D38圆管端盖塑料", spec: "Φ38", price: 0.03968 },
-        "XJ-0008": { name: "D48圆管端盖塑料", spec: "Φ48", price: 0.04127 },
-        "XJ-0018": { name: "D48-38橡胶环EPDM", spec: "Φ48-38", price: 0.06667 },
-        "FN-D48T3-600": { name: "600圆管地桩D48", spec: "L600-D48-T3-3M10", price: 3.7302 },
-        "FN-D48T3-750": { name: "750圆管地桩D48", spec: "L750-D48-T3-3M10", price: 4.2063 },
-        "FN-D48T3-900": { name: "900圆管地桩D48", spec: "L900-D48-T3-3M10", price: 4.8413 },
-        "FN-D48T3-1000": { name: "1000圆管地桩D48", spec: "L1000-D48-T3-3M10", price: 5.1587 },
-        "FA-0020": { name: "SUS304外六角螺栓", spec: "M10x20", price: 0.06824 }
-    };
+    // 围栏/门物料价格从后端 fence_gate_materials 数据库动态抓取（不再写死）。
+    let priceMap = {};
+    let priceMapPromise = null;
 
-    const FENCE_PRICE_DB_100 = {
-        "FN01-W0104-1000": { name: "折半圆网片-100*150", price3_0: 6.4254, price3_5: 7.3892 },
-        "FN01-W0104-1200": { name: "折半圆网片-100*150", price3_0: 7.0476, price3_5: 8.1047 },
-        "FN01-W0104-1500": { name: "折半圆网片-100*150", price3_0: 8.1429, price3_5: 9.3643 },
-        "FN01-W0104-1800": { name: "折半圆网片-100*150", price3_0: 9.8413, price3_5: 11.3175 },
-        "FN01-W0104-2000": { name: "折半圆网片-100*150", price3_0: 10.3175, price3_5: 11.8651 },
-        "FN01-L0203-1160": { name: "锁地桩圆管", spec: "38*1.5*1160", price: 3.2365 },
-        "FN01-L0204-1410": { name: "锁地桩圆管", spec: "38*1.5*1410", price: 3.7778 },
-        "FN01-L0205-1710": { name: "锁地桩圆管", spec: "38*1.5*1710", price: 4.3810 },
-        "FN01-L0206-2060": { name: "锁地桩圆管", spec: "38*1.5*2060", price: 5.0317 },
-        "FN01-L0207-2260": { name: "锁地桩圆管", spec: "38*1.5*2260", price: 5.6508 },
-        "FN01-L0103-1160": { name: "平头圆管", spec: "48*2.0*1160", price: 4.5587 },
-        "FN01-L0104-1410": { name: "平头圆管", spec: "48*2.0*1410", price: 5.3333 },
-        "FN01-L0105-1710": { name: "平头圆管", spec: "48*2.0*1710", price: 6.2698 },
-        "FN01-L0106-2060": { name: "平头圆管", spec: "48*2.0*2060", price: 7.3651 },
-        "FN01-L0107-2260": { name: "平头圆管", spec: "48*2.0*2260", price: 8.2857 },
-        "FN01-L1103-1460": { name: "削尖圆管", spec: "48*2.0*1460", price: 5.4921 },
-        "FN01-L1104-1760": { name: "削尖圆管", spec: "48*2.0*1760", price: 6.4286 },
-        "FN01-L1105-2210": { name: "削尖圆管", spec: "48*2.0*2210", price: 8.1429 },
-        "FN01-L1106-2660": { name: "削尖圆管", spec: "48*2.0*2660", price: 9.8413 },
-        "FN01-L1107-2960": { name: "削尖圆管", spec: "48*2.0*2960", price: 10.9365 },
-        "FN-PJ-0001": { name: "网扣组件", spec: "35", price: 0.2543 },
-        "FN-PJ-0003": { name: "M6x70弯钩螺栓组件", spec: "M6x70", price: 0.1567 },
-        "XJ-0017": { name: "D38圆管端盖塑料", spec: "Φ38", price: 0.03968 },
-        "XJ-0008": { name: "D48圆管端盖塑料", spec: "Φ48", price: 0.04127 },
-        "XJ-0018": { name: "D48-38橡胶环EPDM", spec: "Φ48-38", price: 0.06667 },
-        "FN-D48T3-600": { name: "600圆管地桩D48", spec: "L600-D48-T3-3M10", price: 3.7302 },
-        "FN-D48T3-750": { name: "750圆管地桩D48", spec: "L750-D48-T3-3M10", price: 4.2063 },
-        "FN-D48T3-900": { name: "900圆管地桩D48", spec: "L900-D48-T3-3M10", price: 4.8413 },
-        "FN-D48T3-1000": { name: "1000圆管地桩D48", spec: "L1000-D48-T3-3M10", price: 5.1587 },
-        "FA-0020": { name: "SUS304外六角螺栓", spec: "M10x20", price: 0.06824 }
-    };
+    function ensureFencePrices() {
+        if (priceMapPromise) return priceMapPromise;
+        priceMapPromise = fetch('/api/fence-materials/prices', { credentials: 'same-origin' })
+            .then(function (resp) { return resp.ok ? resp.json() : { success: false }; })
+            .then(function (payload) {
+                priceMap = (payload && payload.success && payload.data) ? payload.data : {};
+                return priceMap;
+            })
+            .catch(function () { priceMap = {}; return priceMap; });
+        return priceMapPromise;
+    }
+
+    function getMaterialRecord(code) {
+        return priceMap[code] || null;
+    }
+
+    function getMaterialName(code, fallback) {
+        const rec = getMaterialRecord(code);
+        return (rec && rec.name) ? rec.name : (fallback || '');
+    }
+
+    function getMaterialSpec(code, fallback) {
+        const rec = getMaterialRecord(code);
+        return (rec && rec.spec) ? rec.spec : (fallback || '');
+    }
 
     const FENCE_STYLE_META_74 = {
         "38CC-100": { type: "fence", height: 1000, meshCode: "FN01-W0101-1000", meshCodeThick: "FN01-W0102-1000", postCode: "FN01-L0203-1160", pileCode: "FN-D48T3-600", endCap: "XJ-0017", rubber: "XJ-0018", postLen: "1160", postSpec: "38*1.5*1160" },
@@ -126,55 +85,6 @@
         "48C2G-200": { type: "fence", height: 2000, meshCode: "FN01-W0104-2000", meshCodeThick: "FN01-W0104-2000", postCode: "FN01-L0107-2260", pileCode: "FN-D48T3-1000", endCap: "XJ-0008", rubber: "XJ-0018", postLen: "2260", postSpec: "48*2.0*2260" }
     };
 
-    const GATE_MESH_PRICE_DB = {
-        "M0001-1000": 47.937, "M0001-1200": 49.206, "M0001-1500": 56.984,
-        "M0001-1800": 63.651, "M0001-2000": 68.413,
-        "M0002-1000": 74.127, "M0002-1200": 78.889, "M0002-1500": 90.317,
-        "M0002-1800": 100.000, "M0002-2000": 106.190,
-        "M0003-1000": 85.397, "M0003-1200": 90.635, "M0003-1500": 105.714,
-        "M0003-1800": 116.508, "M0003-2000": 124.603,
-        "M0004-1000": 47.937, "M0004-1200": 49.206, "M0004-1500": 56.984,
-        "M0004-1800": 63.651, "M0004-2000": 68.413,
-        "M0005-1000": 47.937, "M0005-1200": 49.206, "M0005-1500": 56.984,
-        "M0005-1800": 63.651, "M0005-2000": 68.413,
-        "M0006-1000": 74.127, "M0006-1200": 78.889, "M0006-1500": 90.317,
-        "M0006-1800": 100.000, "M0006-2000": 106.190,
-        "M0301-1000": 47.937, "M0301-1200": 49.206, "M0301-1500": 56.984,
-        "M0301-1800": 63.651, "M0301-2000": 68.413,
-        "M0302-1000": 74.127, "M0302-1200": 78.889, "M0302-1500": 90.317,
-        "M0302-1800": 100.000, "M0302-2000": 106.190,
-        "M0303-1000": 85.397, "M0303-1200": 90.635, "M0303-1500": 105.714,
-        "M0303-1800": 116.508, "M0303-2000": 124.603,
-        "M0304-1000": 47.937, "M0304-1200": 49.206, "M0304-1500": 56.984,
-        "M0304-1800": 63.651, "M0304-2000": 68.413,
-        "M0305-1000": 47.937, "M0305-1200": 49.206, "M0305-1500": 56.984,
-        "M0305-1800": 63.651, "M0305-2000": 68.413,
-        "M0306-1000": 74.127, "M0306-1200": 78.889, "M0306-1500": 90.317,
-        "M0306-1800": 100.000, "M0306-2000": 106.190,
-        "M1001-1000": 47.937, "M1001-1200": 49.206, "M1001-1500": 56.984,
-        "M1001-1800": 63.651, "M1001-2000": 68.413,
-        "M1002-1000": 74.127, "M1002-1200": 78.889, "M1002-1500": 90.317,
-        "M1002-1800": 100.000, "M1002-2000": 106.190,
-        "M1003-1000": 85.397, "M1003-1200": 90.635, "M1003-1500": 105.714,
-        "M1003-1800": 116.508, "M1003-2000": 124.603,
-        "M1004-1000": 47.937, "M1004-1200": 49.206, "M1004-1500": 56.984,
-        "M1004-1800": 63.651, "M1004-2000": 68.413,
-        "M1005-1000": 47.937, "M1005-1200": 49.206, "M1005-1500": 56.984,
-        "M1005-1800": 63.651, "M1005-2000": 68.413,
-        "M1301-1000": 47.937, "M1301-1200": 49.206, "M1301-1500": 56.984,
-        "M1301-1800": 63.651, "M1301-2000": 68.413,
-        "M1302-1000": 74.127, "M1302-1200": 78.889, "M1302-1500": 90.317,
-        "M1302-1800": 100.000, "M1302-2000": 106.190,
-        "M1303-1000": 85.397, "M1303-1200": 90.635, "M1303-1500": 105.714,
-        "M1303-1800": 116.508, "M1303-2000": 124.603,
-        "M1304-1000": 47.937, "M1304-1200": 49.206, "M1304-1500": 56.984,
-        "M1304-1800": 63.651, "M1304-2000": 68.413,
-        "M1305-1000": 47.937, "M1305-1200": 49.206, "M1305-1500": 56.984,
-        "M1305-1800": 63.651, "M1305-2000": 68.413,
-        "M1306-1000": 74.127, "M1306-1200": 78.889, "M1306-1500": 90.317,
-        "M1306-1800": 100.000, "M1306-2000": 106.190,
-    };
-
     const COLOR_PREFIX_MAP = {
         '白色浸塑': 'FN01', '咖啡色浸塑': 'FN02', '绿色浸塑': 'FN03',
         '灰褐色浸塑': 'FN04', '深茶色浸塑': 'FN05', '银灰色浸塑': 'FN06',
@@ -199,20 +109,6 @@
         const hMap = { "100": 1000, "120": 1200, "150": 1500, "180": 1800, "200": 2000 };
         return `${series}-${hMap[hCode] || 1000}`;
     }
-
-    const GATE_PARTS_DB = {
-        "FN-PJ-0002": { name: "门扣组件", spec: "35", price: 0.47703 },
-        "FN-PJ-0004": { name: "M6x50弯钩螺栓组件", spec: "M6x50", price: 0.16895 },
-        "XJ-0009": { name: "D60圆管端盖塑料", spec: "Φ60", price: 0.08254 },
-        "FN-PJ-0005": { name: "SUS304横插销", spec: "Φ11-150-58", price: 1.74603 },
-        "FN-PJ-0006": { name: "SUS304竖插销", spec: "Φ16-460-120", price: 2.06349 },
-        "FN-D76T3-600": { name: "600圆管地桩D76", spec: "L600-D76-T3-3M12", price: 5.15873 },
-        "FN-D76T3-750": { name: "750圆管地桩D76", spec: "L750-D76-T3-3M12", price: 5.95238 },
-        "FN-D76T3-900": { name: "900圆管地桩D76", spec: "L900-D76-T3-3M12", price: 7.06349 },
-        "FN-D76T3-1000": { name: "1000圆管地桩D76", spec: "L1000-D76-T3-3M12", price: 7.22222 },
-        "FA-0137": { name: "SUS304外六角螺栓", spec: "M12x35", price: 0.13216 },
-        "XJ-0011": { name: "D76-60橡胶环EPDM", spec: "Φ76-60", price: 0.20635 }
-    };
 
     const DEFAULT_STATE = {
         activeTab: "fence",
@@ -504,8 +400,8 @@
         return number.toFixed(1);
     }
 
-    function getFenceDb(meshType) {
-        return meshType === "74x150" ? FENCE_PRICE_DB_74 : FENCE_PRICE_DB_100;
+    function getFenceDb() {
+        return priceMap;
     }
 
     function getFenceStyleMeta(meshType) {
@@ -532,17 +428,27 @@
     }
 
     function getFenceMeshPrice(meta, wireValue, meshType) {
-        const db = getFenceDb(meshType);
         const tier = getWireTier(wireValue);
         const meshCode = tier === "3.5" ? meta.meshCodeThick : meta.meshCode;
-        const item = db[meshCode];
+        const item = getMaterialRecord(meshCode);
         if (!item) return 0;
-        if (tier === "3.5" && item.price3_5 !== undefined) return item.price3_5;
-        return item.price3_0 !== undefined ? item.price3_0 : item.price || 0;
+        if (tier === "3.5" && item.price_3_5_usd != null) return item.price_3_5_usd;
+        return item.price_usd || 0;
     }
 
-    function getFencePartPrice(code, meshType) {
-        return getFenceDb(meshType)[code]?.price || 0;
+    function getFencePartPrice(code) {
+        const item = getMaterialRecord(code);
+        return (item && item.price_usd) ? item.price_usd : 0;
+    }
+
+    function getGateMeshPrice(fullCode) {
+        const item = getMaterialRecord(fullCode);
+        return (item && item.price_usd) ? item.price_usd : 0;
+    }
+
+    function gatePart(code) {
+        const rec = getMaterialRecord(code) || {};
+        return { name: rec.name || '', spec: rec.spec || '', price: rec.price_usd || 0 };
     }
 
     function getFenceCoefficient(height) {
@@ -588,7 +494,7 @@
                 seq: 1,
                 code: usedMeshCode,
                 name: db[usedMeshCode]?.name || "网片",
-                spec: `${meta.height}*2000`,
+                spec: getMaterialSpec(usedMeshCode, ""),
                 length: "",
                 qty: meshQty,
                 remark: input.surface,
@@ -809,24 +715,24 @@
         const capQty = postQty;
         const horizontalPinQty = isSingle ? 0 : qty;
         const verticalPinQty = isSingle ? 0 : qty * 2;
-        const meshPrice = GATE_MESH_PRICE_DB[meshBaseCode] || 0;
         const colorPrefix = COLOR_PREFIX_MAP[input.gateSurface] || 'FN01';
         const fullMeshCode = colorPrefix + '-' + meshBaseCode;
+        const meshPrice = getGateMeshPrice(fullMeshCode);
 
         const fenceSubtotal =
             meshPrice * meshQty +
-            GATE_PARTS_DB["FN-PJ-0002"].price * buckleQty +
-            GATE_PARTS_DB["FN-PJ-0004"].price * boltQty +
-            GATE_PARTS_DB["XJ-0009"].price * capQty +
-            GATE_PARTS_DB["FN-PJ-0005"].price * horizontalPinQty +
-            GATE_PARTS_DB["FN-PJ-0006"].price * verticalPinQty;
+            gatePart("FN-PJ-0002").price * buckleQty +
+            gatePart("FN-PJ-0004").price * boltQty +
+            gatePart("XJ-0009").price * capQty +
+            gatePart("FN-PJ-0005").price * horizontalPinQty +
+            gatePart("FN-PJ-0006").price * verticalPinQty;
 
         const rows = [
             {
                 seq: 1,
                 code: fullMeshCode,
                 name: "门网片(含门柱门框)",
-                spec: "74*150*Φ4.2",
+                spec: getMaterialSpec(fullMeshCode, "74*150*Φ4.2"),
                 length: "",
                 qty: meshQty,
                 remark: input.gateSurface,
@@ -841,8 +747,8 @@
                 length: "",
                 qty: buckleQty,
                 remark: "",
-                unitPrice: GATE_PARTS_DB["FN-PJ-0002"].price,
-                lineTotal: GATE_PARTS_DB["FN-PJ-0002"].price * buckleQty
+                unitPrice: gatePart("FN-PJ-0002").price,
+                lineTotal: gatePart("FN-PJ-0002").price * buckleQty
             },
             {
                 seq: 3,
@@ -852,8 +758,8 @@
                 length: "",
                 qty: boltQty,
                 remark: "",
-                unitPrice: GATE_PARTS_DB["FN-PJ-0004"].price,
-                lineTotal: GATE_PARTS_DB["FN-PJ-0004"].price * boltQty
+                unitPrice: gatePart("FN-PJ-0004").price,
+                lineTotal: gatePart("FN-PJ-0004").price * boltQty
             },
             {
                 seq: 4,
@@ -863,8 +769,8 @@
                 length: "",
                 qty: capQty,
                 remark: "套立柱顶部",
-                unitPrice: GATE_PARTS_DB["XJ-0009"].price,
-                lineTotal: GATE_PARTS_DB["XJ-0009"].price * capQty
+                unitPrice: gatePart("XJ-0009").price,
+                lineTotal: gatePart("XJ-0009").price * capQty
             }
         ];
 
@@ -878,8 +784,8 @@
                     length: "",
                     qty: horizontalPinQty,
                     remark: "",
-                    unitPrice: GATE_PARTS_DB["FN-PJ-0005"].price,
-                    lineTotal: GATE_PARTS_DB["FN-PJ-0005"].price * horizontalPinQty
+                    unitPrice: gatePart("FN-PJ-0005").price,
+                    lineTotal: gatePart("FN-PJ-0005").price * horizontalPinQty
                 },
                 {
                     seq: 6,
@@ -889,8 +795,8 @@
                     length: "",
                     qty: verticalPinQty,
                     remark: "",
-                    unitPrice: GATE_PARTS_DB["FN-PJ-0006"].price,
-                    lineTotal: GATE_PARTS_DB["FN-PJ-0006"].price * verticalPinQty
+                    unitPrice: gatePart("FN-PJ-0006").price,
+                    lineTotal: gatePart("FN-PJ-0006").price * verticalPinQty
                 }
             );
         }
@@ -907,22 +813,22 @@
             const pileBoltQty = pileQty * 3;
             const pileRubberQty = postQty;
             pileSubtotal =
-                GATE_PARTS_DB[pileCode].price * pileQty +
-                GATE_PARTS_DB["FA-0137"].price * pileBoltQty +
-                GATE_PARTS_DB["XJ-0011"].price * pileRubberQty;
+                gatePart(pileCode).price * pileQty +
+                gatePart("FA-0137").price * pileBoltQty +
+                gatePart("XJ-0011").price * pileRubberQty;
             const seqBase = rows.length;
 
             rows.push(
                 {
                     seq: seqBase + 1,
                     code: pileCode,
-                    name: GATE_PARTS_DB[pileCode].name,
-                    spec: GATE_PARTS_DB[pileCode].spec,
+                    name: gatePart(pileCode).name,
+                    spec: gatePart(pileCode).spec,
                     length: String(pileLength),
                     qty: pileQty,
                     remark: "",
-                    unitPrice: GATE_PARTS_DB[pileCode].price,
-                    lineTotal: GATE_PARTS_DB[pileCode].price * pileQty
+                    unitPrice: gatePart(pileCode).price,
+                    lineTotal: gatePart(pileCode).price * pileQty
                 },
                 {
                     seq: seqBase + 2,
@@ -932,8 +838,8 @@
                     length: "",
                     qty: pileBoltQty,
                     remark: "",
-                    unitPrice: GATE_PARTS_DB["FA-0137"].price,
-                    lineTotal: GATE_PARTS_DB["FA-0137"].price * pileBoltQty
+                    unitPrice: gatePart("FA-0137").price,
+                    lineTotal: gatePart("FA-0137").price * pileBoltQty
                 },
                 {
                     seq: seqBase + 3,
@@ -943,8 +849,8 @@
                     length: "",
                     qty: pileRubberQty,
                     remark: "套地桩与立柱",
-                    unitPrice: GATE_PARTS_DB["XJ-0011"].price,
-                    lineTotal: GATE_PARTS_DB["XJ-0011"].price * pileRubberQty
+                    unitPrice: gatePart("XJ-0011").price,
+                    lineTotal: gatePart("XJ-0011").price * pileRubberQty
                 }
             );
         }
@@ -1016,9 +922,9 @@
             series = isSingle ? "M0001" : (widthCode === "240" ? "M0002" : "M0003");
         }
         const meshBaseCode = `${series}-${height}`;
-        const meshCode = meshBaseCode;
-        const price = GATE_MESH_PRICE_DB[meshBaseCode];
-        if (price === undefined || qty === 0) return { summaryCards: [], rows: [] };
+        const meshCode = 'FN01-' + meshBaseCode;
+        const price = getGateMeshPrice(meshCode);
+        if (!price || qty === 0) return { summaryCards: [], rows: [] };
 
         const meshQty = 1 * qty;
         const postQty = 2 * qty;
@@ -1039,7 +945,7 @@
                 seq: 1,
                 code: meshCode,
                 name: "门网片(含门柱门框)",
-                spec: "H" + height + "*W" + width,
+                spec: getMaterialSpec(meshCode, "H" + height + "*W" + width),
                 length: "",
                 qty: meshQty,
                 remark: "",
@@ -1054,8 +960,8 @@
                 length: "",
                 qty: buckleQty,
                 remark: "",
-                unitPrice: GATE_PARTS_DB["FN-PJ-0002"].price,
-                lineTotal: GATE_PARTS_DB["FN-PJ-0002"].price * buckleQty
+                unitPrice: gatePart("FN-PJ-0002").price,
+                lineTotal: gatePart("FN-PJ-0002").price * buckleQty
             },
             {
                 seq: 3,
@@ -1065,8 +971,8 @@
                 length: "",
                 qty: boltQty,
                 remark: "",
-                unitPrice: GATE_PARTS_DB["FN-PJ-0004"].price,
-                lineTotal: GATE_PARTS_DB["FN-PJ-0004"].price * boltQty
+                unitPrice: gatePart("FN-PJ-0004").price,
+                lineTotal: gatePart("FN-PJ-0004").price * boltQty
             },
             {
                 seq: 4,
@@ -1076,8 +982,8 @@
                 length: "",
                 qty: capQty,
                 remark: "套立柱顶部",
-                unitPrice: GATE_PARTS_DB["XJ-0009"].price,
-                lineTotal: GATE_PARTS_DB["XJ-0009"].price * capQty
+                unitPrice: gatePart("XJ-0009").price,
+                lineTotal: gatePart("XJ-0009").price * capQty
             }
         ];
 
@@ -1091,8 +997,8 @@
                     length: "",
                     qty: horizontalPinQty,
                     remark: "",
-                    unitPrice: GATE_PARTS_DB["FN-PJ-0005"].price,
-                    lineTotal: GATE_PARTS_DB["FN-PJ-0005"].price * horizontalPinQty
+                    unitPrice: gatePart("FN-PJ-0005").price,
+                    lineTotal: gatePart("FN-PJ-0005").price * horizontalPinQty
                 },
                 {
                     seq: 6,
@@ -1102,8 +1008,8 @@
                     length: "",
                     qty: verticalPinQty,
                     remark: "",
-                    unitPrice: GATE_PARTS_DB["FN-PJ-0006"].price,
-                    lineTotal: GATE_PARTS_DB["FN-PJ-0006"].price * verticalPinQty
+                    unitPrice: gatePart("FN-PJ-0006").price,
+                    lineTotal: gatePart("FN-PJ-0006").price * verticalPinQty
                 }
             );
         }
@@ -1122,13 +1028,13 @@
                 {
                     seq: seqBase + 1,
                     code: pileCode,
-                    name: GATE_PARTS_DB[pileCode].name,
-                    spec: GATE_PARTS_DB[pileCode].spec,
+                    name: gatePart(pileCode).name,
+                    spec: gatePart(pileCode).spec,
                     length: String(pileLength),
                     qty: pileQty,
                     remark: "",
-                    unitPrice: GATE_PARTS_DB[pileCode].price,
-                    lineTotal: GATE_PARTS_DB[pileCode].price * pileQty
+                    unitPrice: gatePart(pileCode).price,
+                    lineTotal: gatePart(pileCode).price * pileQty
                 },
                 {
                     seq: seqBase + 2,
@@ -1138,8 +1044,8 @@
                     length: "",
                     qty: pileBoltQty,
                     remark: "",
-                    unitPrice: GATE_PARTS_DB["FA-0137"].price,
-                    lineTotal: GATE_PARTS_DB["FA-0137"].price * pileBoltQty
+                    unitPrice: gatePart("FA-0137").price,
+                    lineTotal: gatePart("FA-0137").price * pileBoltQty
                 },
                 {
                     seq: seqBase + 3,
@@ -1149,8 +1055,8 @@
                     length: "",
                     qty: pileRubberQty,
                     remark: "套地桩与立柱",
-                    unitPrice: GATE_PARTS_DB["XJ-0011"].price,
-                    lineTotal: GATE_PARTS_DB["XJ-0011"].price * pileRubberQty
+                    unitPrice: gatePart("XJ-0011").price,
+                    lineTotal: gatePart("XJ-0011").price * pileRubberQty
                 }
             );
         }
@@ -1207,7 +1113,7 @@
                 seq: 1,
                 code: usedMeshCode,
                 name: db[usedMeshCode]?.name || "网片",
-                spec: styleMeta.height + "*2000",
+                spec: getMaterialSpec(usedMeshCode, ""),
                 length: "",
                 qty: meshQty,
                 remark: surface || "",
@@ -1976,7 +1882,7 @@
         buildFenceQuoteByStyle,
         buildGateQuote,
         buildGateQuoteByStyle,
-        GATE_MESH_PRICE_DB
+        ready: ensureFencePrices
     };
 
     window.FenceGatePage = {
@@ -1988,13 +1894,16 @@
             containerEl.innerHTML = buildTemplate();
             initializeElements();
             bindEvents();
-            if (options && options.tab) {
-                state.activeTab = options.tab;
-                renderTabs();
-                if (options.tab === "est") renderEst();
-            } else {
-                render();
-            }
+            const finalize = function () {
+                if (options && options.tab) {
+                    state.activeTab = options.tab;
+                    renderTabs();
+                    if (options.tab === "est") renderEst();
+                } else {
+                    render();
+                }
+            };
+            ensureFencePrices().then(finalize).catch(finalize);
         },
 
         destroy() {

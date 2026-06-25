@@ -16,6 +16,7 @@
         { key: 'FEC006', label: 'FEC006' },
         { key: 'FEC020', label: 'FEC020' },
         { key: 'FEC027', label: 'FEC027' },
+        { key: 'FEC035', label: 'FEC035' },
         { key: 'FEPJ_0103', label: 'FEPJ-0103' },
         { key: 'FEPJ_0173', label: 'FEPJ-0173' },
         { key: 'FEPJ_0178', label: 'FEPJ-0178' },
@@ -25,6 +26,14 @@
     ];
 
     let tonPriceTypes = STANDARD_TON_TYPES.slice();
+
+    // 包装类型维度（简易包装/铁托）：吨价键末尾追加 _{pack}
+    const PACK_TYPES = [
+        { key: 'jybz', label: '简易包装' },
+        { key: 'tietuo', label: '铁托' },
+    ];
+    let curPack = 'jybz';
+    const pkSuf = () => '_' + curPack;
 
     const LEN_TIERS = [
         { key: '01', label: '0-1' },
@@ -70,7 +79,7 @@
     const LEN_LABELS = { '01': '0-1', '13': '1-3', '3': '3+' };
 
     function matColKey(side, curKey) {
-        return side + '_' + matTonTier + '_' + matLenTier + '_' + curKey;
+        return side + '_' + matTonTier + '_' + matLenTier + '_' + curKey + '_' + curPack;
     }
 
     function tonTierFromWeight(w) {
@@ -112,17 +121,17 @@
                 LEN_TIERS.forEach(function(lt) {
                     var tonVal;
                     if (isPJ) {
-                        tonVal = parseFloat(getVal('tp-ton-' + tp + '-int-' + tt)) || 0;
+                        tonVal = parseFloat(getVal('tp-ton-' + tp + '-int-' + tt + pkSuf())) || 0;
                     } else {
-                        tonVal = parseFloat(getVal('tp-ton-' + tp + '-int-' + lt.key + '-' + tt)) || 0;
+                        tonVal = parseFloat(getVal('tp-ton-' + tp + '-int-' + lt.key + '-' + tt + pkSuf())) || 0;
                     }
                     var iEl = document.getElementById('tp-i-' + i + '-' + cur.key + '-' + lt.key);
                     if (iEl) iEl.textContent = (Number.isFinite(+w) && tonVal > 0) ? fmt(+w * tonVal) : '';
 
                     if (isPJ) {
-                        tonVal = parseFloat(getVal('tp-ton-' + tp + '-ext-50999')) || 0;
+                        tonVal = parseFloat(getVal('tp-ton-' + tp + '-ext-50999' + pkSuf())) || 0;
                     } else {
-                        tonVal = parseFloat(getVal('tp-ton-' + tp + '-ext-' + lt.key + '-50999')) || 0;
+                        tonVal = parseFloat(getVal('tp-ton-' + tp + '-ext-' + lt.key + '-50999' + pkSuf())) || 0;
                     }
                     var eEl = document.getElementById('tp-e-' + i + '-' + cur.key + '-' + lt.key);
                     if (eEl) {
@@ -141,17 +150,17 @@
             LEN_TIERS.forEach(function(lt) {
                 var tonVal;
                 if (isPJ) {
-                    tonVal = parseFloat(getVal('tp-ton-' + tp + '-int-' + tt)) || 0;
+                    tonVal = parseFloat(getVal('tp-ton-' + tp + '-int-' + tt + pkSuf())) || 0;
                 } else {
-                    tonVal = parseFloat(getVal('tp-ton-' + tp + '-int-' + lt.key + '-' + tt)) || 0;
+                    tonVal = parseFloat(getVal('tp-ton-' + tp + '-int-' + lt.key + '-' + tt + pkSuf())) || 0;
                 }
                 var iEl = document.getElementById('tp-i-' + i + '-' + rmbInt.key + '-' + lt.key);
                 if (iEl) iEl.textContent = (Number.isFinite(+w) && tonVal > 0) ? fmt(+w * tonVal) : '';
 
                 if (isPJ) {
-                    tonVal = parseFloat(getVal('tp-ton-' + tp + '-ext-50999')) || 0;
+                    tonVal = parseFloat(getVal('tp-ton-' + tp + '-ext-50999' + pkSuf())) || 0;
                 } else {
-                    tonVal = parseFloat(getVal('tp-ton-' + tp + '-ext-' + lt.key + '-50999')) || 0;
+                    tonVal = parseFloat(getVal('tp-ton-' + tp + '-ext-' + lt.key + '-50999' + pkSuf())) || 0;
                 }
                 var eEl = document.getElementById('tp-e-' + i + '-' + rmbInt.key + '-' + lt.key);
                 if (eEl) {
@@ -180,11 +189,11 @@
             LEN_TIERS.forEach(function(lt) {
                 var intVal = '', extVal = '';
                 if (isPJ) {
-                    intVal = getVal('tp-ton-' + k + '-int-' + tt);
-                    extVal = getVal('tp-ton-' + k + '-ext-50999');
+                    intVal = getVal('tp-ton-' + k + '-int-' + tt + pkSuf());
+                    extVal = getVal('tp-ton-' + k + '-ext-50999' + pkSuf());
                 } else {
-                    intVal = getVal('tp-ton-' + k + '-int-' + lt.key + '-' + tt);
-                    extVal = getVal('tp-ton-' + k + '-ext-' + lt.key + '-50999');
+                    intVal = getVal('tp-ton-' + k + '-int-' + lt.key + '-' + tt + pkSuf());
+                    extVal = getVal('tp-ton-' + k + '-ext-' + lt.key + '-50999' + pkSuf());
                 }
                 var dIntEl = document.getElementById('tp-d-' + k + '-int-' + lt.key);
                 var dExtEl = document.getElementById('tp-d-' + k + '-ext-' + lt.key);
@@ -221,9 +230,14 @@
         TON_WEIGHT_OPTIONS.forEach(function(o) {
             btns += '<button class="btn small tp-tw-btn' + (tonWeight === o.value ? ' primary' : '') + '" data-tw="' + o.value + '">' + o.label + '</button> ';
         });
+        var packBtns = '';
+        PACK_TYPES.forEach(function(p) {
+            packBtns += '<button class="btn small tp-pack-btn' + (curPack === p.key ? ' primary' : '') + '" data-pack="' + p.key + '">' + p.label + '</button> ';
+        });
         var h = '<div class="tp-sg"><h3 class="tp-h3">\u5428\u4ef7\u663e\u793a\uff08\u81ea\u52a8\u5339\u914d\uff09</h3>' +
             '<div class="tp-tw-row">' +
             '<span>\u5428\u91cd\u9009\u62e9:</span> ' + btns +
+            '<span style="margin-left:12px">\u5305\u88c5:</span> ' + packBtns +
             '<span id="tp-tier-label" style="color:#2563eb;font-weight:600">\u5f53\u524d: ' + tierLabel + '</span>' +
             '</div>' +
             '<table class="tp-st"><thead><tr>' +
@@ -239,9 +253,9 @@
             LEN_TIERS.forEach(function(lt) {
                 var intVal;
                 if (isPJ) {
-                    intVal = settings['ton_' + k + '_int_' + tt] || '';
+                    intVal = settings['ton_' + k + '_int_' + tt + pkSuf()] || '';
                 } else {
-                    intVal = settings['ton_' + k + '_int_' + lt.key + '_' + tt] || '';
+                    intVal = settings['ton_' + k + '_int_' + lt.key + '_' + tt + pkSuf()] || '';
                 }
                 h += '<td id="tp-d-' + k + '-int-' + lt.key + '">' + esc(intVal) + '</td>';
             });
@@ -251,9 +265,9 @@
                 } else {
                     var ev;
                     if (isPJ) {
-                        ev = settings['ton_' + k + '_ext_50999'] || '';
+                        ev = settings['ton_' + k + '_ext_50999' + pkSuf()] || '';
                     } else {
-                        ev = settings['ton_' + k + '_ext_' + lt.key + '_50999'] || '';
+                        ev = settings['ton_' + k + '_ext_' + lt.key + '_50999' + pkSuf()] || '';
                     }
                     h += '<td id="tp-d-' + k + '-ext-' + lt.key + '">' + esc(ev) + '</td>';
                 }
@@ -334,7 +348,13 @@
     }
 
     function buildEditSection() {
+        var packBtns = '';
+        PACK_TYPES.forEach(function(p) {
+            packBtns += '<button class="btn small tp-pack-btn' + (curPack === p.key ? ' primary' : '') + '" data-pack="' + p.key + '">' + p.label + '</button> ';
+        });
         var h = '<div class="tp-sg"><h3 class="tp-h3">\u5b8c\u6574\u5428\u4ef7\u5e95\u8868\uff08\u53ef\u7f16\u8f91\uff09</h3>' +
+            '<div class="tp-mt-filter"><span>\u5305\u88c5\u7c7b\u578b:</span> ' + packBtns +
+            '<span style="font-size:12px;color:#94a3b8">\u5207\u6362\u5f55\u5165\u7b80\u6613\u5305\u88c5 / \u94c1\u6258\u5428\u4ef7</span></div>' +
             '<div style="display:flex;gap:8px;margin-bottom:8px">' +
             '<button class="btn small" id="tp-dl-ton" style="background:#059669;color:#fff">\u4e0b\u8f7d\u5428\u4ef7\u5e95\u8868</button>' +
             '<label class="btn small" style="background:#2563eb;color:#fff;cursor:pointer">\u6279\u91cf\u5bfc\u5165\u5428\u4ef7<input type="file" id="tp-imp-ton" accept=".xlsx,.xls" style="display:none"></label>' +
@@ -359,21 +379,21 @@
             h += '<tr><td><strong>' + esc(tp.label) + '</strong></td>';
             if (isPJ) {
                 TON_TIERS.forEach(function(tt) {
-                    var sk = 'ton_' + k + '_int_' + tt.key;
-                    h += '<td colspan="3"><input class="input tp-param tp-ton" id="tp-ton-' + k + '-int-' + tt.key + '" type="number" step="any" value="' + esc(settings[sk] || '') + '" style="width:80px"></td>';
+                    var sk = 'ton_' + k + '_int_' + tt.key + pkSuf();
+                    h += '<td colspan="3"><input class="input tp-param tp-ton" id="tp-ton-' + k + '-int-' + tt.key + pkSuf() + '" type="number" step="any" value="' + esc(settings[sk] || '') + '" style="width:80px"></td>';
                 });
-                var sk = 'ton_' + k + '_ext_50999';
-                h += '<td colspan="3"><input class="input tp-param tp-ton" id="tp-ton-' + k + '-ext-50999' + '" type="number" step="any" value="' + esc(settings[sk] || '') + '" style="width:80px"></td>';
+                var sk = 'ton_' + k + '_ext_50999' + pkSuf();
+                h += '<td colspan="3"><input class="input tp-param tp-ton" id="tp-ton-' + k + '-ext-50999' + pkSuf() + '" type="number" step="any" value="' + esc(settings[sk] || '') + '" style="width:80px"></td>';
             } else {
                 TON_TIERS.forEach(function(tt) {
                     LEN_TIERS.forEach(function(lt) {
-                        var sk = 'ton_' + k + '_int_' + lt.key + '_' + tt.key;
-                        h += '<td><input class="input tp-param tp-ton" id="tp-ton-' + k + '-int-' + lt.key + '-' + tt.key + '" type="number" step="any" value="' + esc(settings[sk] || '') + '"></td>';
+                        var sk = 'ton_' + k + '_int_' + lt.key + '_' + tt.key + pkSuf();
+                        h += '<td><input class="input tp-param tp-ton" id="tp-ton-' + k + '-int-' + lt.key + '-' + tt.key + pkSuf() + '" type="number" step="any" value="' + esc(settings[sk] || '') + '"></td>';
                     });
                 });
                 LEN_TIERS.forEach(function(lt) {
-                    var sk = 'ton_' + k + '_ext_' + lt.key + '_50999';
-                    h += '<td><input class="input tp-param tp-ton" id="tp-ton-' + k + '-ext-' + lt.key + '-50999' + '" type="number" step="any" value="' + esc(settings[sk] || '') + '"></td>';
+                    var sk = 'ton_' + k + '_ext_' + lt.key + '_50999' + pkSuf();
+                    h += '<td><input class="input tp-param tp-ton" id="tp-ton-' + k + '-ext-' + lt.key + '-50999' + pkSuf() + '" type="number" step="any" value="' + esc(settings[sk] || '') + '"></td>';
                 });
             }
             h += '</tr>';
@@ -418,7 +438,7 @@
         document.getElementById('tp-add').addEventListener('click', function() { showMaterialModal(); });
         document.getElementById('tp-del').addEventListener('click', handleDelete);
         document.getElementById('tp-export').addEventListener('click', handleExport);
-        document.getElementById('tp-dl-ton').addEventListener('click', function() { window.open(api('/temp-price/export-ton'), '_blank'); });
+        document.getElementById('tp-dl-ton').addEventListener('click', function() { window.open(api('/temp-price/export-ton?pack=' + encodeURIComponent(curPack)), '_blank'); });
         document.getElementById('tp-imp-ton').addEventListener('change', handleImportTon);
         document.getElementById('tp-prev').addEventListener('click', function() { if (currentPage > 1) { currentPage--; loadPage(); } });
         document.getElementById('tp-next').addEventListener('click', function() { if (currentPage < totalPages) { currentPage++; loadPage(); } });
@@ -427,6 +447,14 @@
             btn.addEventListener('click', function() {
                 tonWeight = parseInt(btn.dataset.tw, 10);
                 readInputs();
+                renderPage();
+            });
+        });
+
+        containerEl.querySelectorAll('.tp-pack-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                readInputs();
+                curPack = btn.dataset.pack;
                 renderPage();
             });
         });
@@ -477,17 +505,17 @@
             var isPJ = k.startsWith('FEPJ_');
             if (isPJ) {
                 TON_TIERS.forEach(function(tt) {
-                    settings['ton_' + k + '_int_' + tt.key] = (document.getElementById('tp-ton-' + k + '-int-' + tt.key) || {}).value || '';
+                    settings['ton_' + k + '_int_' + tt.key + pkSuf()] = (document.getElementById('tp-ton-' + k + '-int-' + tt.key + pkSuf()) || {}).value || '';
                 });
-                settings['ton_' + k + '_ext_50999'] = (document.getElementById('tp-ton-' + k + '-ext-50999') || {}).value || '';
+                settings['ton_' + k + '_ext_50999' + pkSuf()] = (document.getElementById('tp-ton-' + k + '-ext-50999' + pkSuf()) || {}).value || '';
             } else {
                 TON_TIERS.forEach(function(tt) {
                     LEN_TIERS.forEach(function(lt) {
-                        settings['ton_' + k + '_int_' + lt.key + '_' + tt.key] = (document.getElementById('tp-ton-' + k + '-int-' + lt.key + '-' + tt.key) || {}).value || '';
+                        settings['ton_' + k + '_int_' + lt.key + '_' + tt.key + pkSuf()] = (document.getElementById('tp-ton-' + k + '-int-' + lt.key + '-' + tt.key + pkSuf()) || {}).value || '';
                     });
                 });
                 LEN_TIERS.forEach(function(lt) {
-                    settings['ton_' + k + '_ext_' + lt.key + '_50999'] = (document.getElementById('tp-ton-' + k + '-ext-' + lt.key + '-50999') || {}).value || '';
+                    settings['ton_' + k + '_ext_' + lt.key + '_50999' + pkSuf()] = (document.getElementById('tp-ton-' + k + '-ext-' + lt.key + '-50999' + pkSuf()) || {}).value || '';
                 });
             }
         });
@@ -515,7 +543,7 @@
                 newKeys.forEach(function(k) { if (!(k in settings)) settings[k] = sd.settings[k]; });
                 Object.keys(settings).forEach(function(k) { if (newKeys.indexOf(k) >= 0) settings[k] = sd.settings[k]; });
             }
-            if (sd.success && sd.tonPriceTypes) tonPriceTypes = sd.tonPriceTypes;
+            // 吨价底表固定只展示标准物料（简易包装/铁托），不引入历史动态类型
         } catch (e) { console.error(e); }
         try {
             var r = await fetch(api('/temp-price/materials?page=' + currentPage + '&pageSize=' + pageSize), { credentials: 'same-origin' });
@@ -553,7 +581,7 @@
         try {
             var fd = new FormData();
             fd.append('file', file);
-            var r = await fetch(api('/temp-price/import-ton'), { method: 'POST', credentials: 'same-origin', body: fd });
+            var r = await fetch(api('/temp-price/import-ton?pack=' + encodeURIComponent(curPack)), { method: 'POST', credentials: 'same-origin', body: fd });
             var d = await r.json();
             if (!d.success) throw new Error(d.message);
             if (st) { st.textContent = '\u5bfc\u5165\u6210\u529f\uff0c\u66f4\u65b0 ' + d.updated + ' \u4e2a\u5428\u4ef7'; st.style.color = '#16a34a'; }
@@ -670,7 +698,7 @@
             var sr = await fetch(api('/temp-price/settings'), { credentials: 'same-origin' });
             var sd = await sr.json();
             if (sd.success && sd.settings) settings = sd.settings;
-            if (sd.success && sd.tonPriceTypes) tonPriceTypes = sd.tonPriceTypes;
+            // 吨价底表固定只展示标准物料（简易包装/铁托）
 
             var mr = await fetch(api('/temp-price/materials?page=1&pageSize=' + pageSize), { credentials: 'same-origin' });
             var md = await mr.json();

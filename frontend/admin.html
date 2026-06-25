@@ -54,6 +54,7 @@
           <a class="btn" href="app.html?group=英语组&page=quotation">英语报价</a>
           <a class="btn" href="app.html?group=日语组&page=quotation">日语报价</a>
           <a class="btn" href="app.html?group=物流组&page=logistics">物流组</a>
+          <a class="btn" href="app.html?group=设计组&page=email-mgmt">设计组</a>
           <a class="btn" href="app.html?group=韩语组&page=records">数据库待审核变更</a>
           <a class="btn" href="app.html?group=韩语组&page=database">数据库显示</a>
           <a class="btn" href="app.html?group=韩语组&page=questions">问答审核</a>
@@ -95,6 +96,7 @@
                   <span class="tag">日语组 <span id="ja-accounts">0</span></span>
                   <span class="tag">英语组 <span id="en-accounts">0</span></span>
                   <span class="tag">物流组 <span id="wl-accounts">0</span></span>
+                  <span class="tag">设计组 <span id="design-accounts">0</span></span>
                   <span class="tag">管理员 <span id="admin-accounts">0</span></span>
                 </div>
               </div>
@@ -129,6 +131,21 @@
               </div>
 
               <div class="card">
+                <h3>批量补充钉钉 UserID</h3>
+                <div class="muted">上传钉钉通讯录导出的 Excel，按「姓名」匹配现有人员并写入钉钉 UserID。需包含姓名列（姓名/中文名）与 UserId 列（员工UserId/UserId）。</div>
+                <form id="import-userids-form" enctype="multipart/form-data" style="margin-top: 12px;">
+                  <div class="form-field">
+                    <label for="import-userids-file">选择 Excel 文件</label>
+                    <input class="input" type="file" id="import-userids-file" name="file" accept=".xlsx,.xls" required />
+                  </div>
+                  <div class="form-actions" style="margin-top: 8px;">
+                    <button class="btn primary" type="submit" id="import-userids-btn">开始补充</button>
+                  </div>
+                </form>
+                <div id="import-userids-message" class="notice" style="margin-top: 12px; display: none;"></div>
+              </div>
+
+              <div class="card">
                 <h3>权限说明</h3>
                 <div class="muted">管理员可访问全部页面并管理人员；组员仅访问各自业务页面。</div>
                 <div class="notice" style="margin-top: 12px;">账号统一保存于服务器数据库，内网用户共用同一套账号与密码。</div>
@@ -146,7 +163,10 @@
                     <option>韩语组</option>
                     <option>日语组</option>
                     <option>英语组</option>
+                    <option>亚太组</option>
                     <option>物流组</option>
+                    <option>设计组</option>
+                    <option>人事组</option>
                   </select>
                 </div>
 
@@ -169,7 +189,10 @@
                           <option>韩语组</option>
                           <option>英语组</option>
                           <option>日语组</option>
+                          <option>亚太组</option>
                           <option>物流组</option>
+                          <option>设计组</option>
+                          <option>人事组</option>
                         </select>
                       </div>
                     </div>
@@ -194,6 +217,10 @@
                         <label for="account-email">邮箱 (Email)</label>
                         <input class="input" id="account-email" name="email" placeholder="邮箱地址" />
                       </div>
+                      <div class="form-field">
+                        <label for="account-dingtalk-id">钉钉 UserID</label>
+                        <input class="input" id="account-dingtalk-id" name="dingtalkId" placeholder="钉钉通讯录 UserId" />
+                      </div>
                     </div>
 
                     <div class="form-row" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e2e8f0;">
@@ -211,7 +238,10 @@
                           <option>韩语业务员</option>
                           <option>英语业务员</option>
                           <option>日语业务员</option>
+                          <option>亚太业务员</option>
                           <option>业务助理</option>
+                          <option>设计组</option>
+                          <option>总助</option>
                           <option>物流专员</option>
                           <option value="admin">管理员</option>
                         </select>
@@ -264,6 +294,10 @@
                           <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text);">
                             <input type="checkbox" class="account-permission" value="logistics" style="width: 16px; height: 16px;">
                             物流排柜汇总
+                          </label>
+                          <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text);">
+                            <input type="checkbox" class="account-permission" value="schedule" style="width: 16px; height: 16px;">
+                            总助日程提醒
                           </label>
                         </div>
                       </div>
@@ -338,8 +372,22 @@
             </div>
 
             <div class="card">
-              <h3>用户排行（本月）</h3>
-              <div class="muted">按报价生成次数降序排列。</div>
+              <h3>用户排行</h3>
+              <div class="muted">按报价生成次数降序排列，可按时间段与小组筛选。</div>
+              <div class="toolbar" style="margin-top: 12px;">
+                <select class="input" id="usage-user-period" style="width: auto;">
+                  <option value="today" selected>当天</option>
+                  <option value="7d">近7天</option>
+                  <option value="30d">近30天</option>
+                </select>
+                <select class="input" id="usage-user-group-filter" style="width: auto;">
+                  <option value="">全部小组</option>
+                  <option value="韩语组">韩语组</option>
+                  <option value="日语组">日语组</option>
+                  <option value="英语组">英语组</option>
+                  <option value="亚太组">亚太组</option>
+                </select>
+              </div>
               <div style="overflow-x: auto; margin-top: 12px;">
                 <table>
                   <thead>
@@ -376,6 +424,7 @@
               <input class="input" type="date" id="usage-filter-start" style="width: auto;" />
               <input class="input" type="date" id="usage-filter-end" style="width: auto;" />
               <button class="btn primary" id="usage-search-btn">查询</button>
+              <button class="btn" id="usage-download-btn">下载当前查询结果</button>
             </div>
             <div style="overflow-x: auto; margin-top: 12px;">
               <table>

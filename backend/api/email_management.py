@@ -11,7 +11,7 @@ from backend.repositories.inquiry_repository import (
     get_price_cache_stats,
     list_price_cache,
 )
-from backend.services.auth_service import ensure_permission
+from backend.services.auth_service import ensure_permission, ensure_group
 
 email_mgmt_bp = Blueprint('email_mgmt', __name__, url_prefix='/api/email-mgmt')
 
@@ -151,7 +151,7 @@ def get_last_scan_time_route():
 
 @email_mgmt_bp.delete('/price-cache/<int:item_id>')
 def delete_cache_item_route(item_id):
-    ensure_permission('quotation')
+    ensure_group('设计组')
     deleted = delete_price_cache_item(item_id)
     if deleted:
         return jsonify({'success': True, 'message': '已删除'})
@@ -160,7 +160,7 @@ def delete_cache_item_route(item_id):
 
 @email_mgmt_bp.post('/price-cache/batch-delete')
 def batch_delete_cache_route():
-    ensure_permission('quotation')
+    ensure_group('设计组')
     data = request.get_json(silent=True) or {}
     ids = data.get('ids') or []
     if not ids:
@@ -171,7 +171,7 @@ def batch_delete_cache_route():
 
 @email_mgmt_bp.get('/price-cache/export')
 def export_price_cache_route():
-    ensure_permission('quotation')
+    ensure_group('设计组')
     keyword = request.args.get('keyword', '').strip()
     items = list_price_cache(keyword=keyword if keyword else None, limit=5000)
 

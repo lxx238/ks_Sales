@@ -6,6 +6,7 @@ from openpyxl.cell.text import InlineFont
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.page import PageMargins
+from backend.core.print_settings import apply_print_setup
 from openpyxl.drawing.image import Image as XLImage
 from PIL import Image as PILImage
 import tempfile
@@ -49,6 +50,8 @@ from backend.core.shared.price_utils import (
     resolve_price_info,
     has_valid_price_info,
     round_to_2_decimal,
+    get_temp_adjusted_base_price,
+    get_temp_base_price, apply_temp_preinstall_adjustment,
 )
 from backend.core.shared.weight_utils import (
     extract_length_from_spec,
@@ -56,6 +59,7 @@ from backend.core.shared.weight_utils import (
     log_weight_formula,
     calculate_report_total_weight,
     calculate_report_unit_weight,
+    lookup_unit_weight_from_material_db,
 )
 from backend.core.shared.image_utils import (
     extract_code_from_filename,
@@ -106,7 +110,9 @@ from backend.core.shared.product_utils import (
     _get_product_name_candidates,
     _match_exclude_group,
     _split_pile_products,
+    normalize_preinstall,
 )
+from backend.core.en_common.quotation_engine import create_total_materials_sheet
 from backend.core.shared.constants import (
     IMAGE_WIDTH,
     IMAGE_HEIGHT,
@@ -313,7 +319,7 @@ def create_inquiry_sheet(workbook, unmatched_products, source_sheet_name, inquir
     # 设置列宽
     column_widths = [
         13.0, 18, 22.175, 74.875, 59.8333333333333, 26.4083333333333, 32.1833333333333, 36.0916666666667,
-        19.5, 13.0, 5.25, 4.25, 9.375, 13.0, 12.5, 20.375,
+        19.5, 13.0, 5.25, 4.25, 9.375, 13.0, 12.5, 13.0, 20.375,
         15.125, 13.0, 7.125, 10.5, 9.0, 15.125, 7.125, 30.25,
         10.5, 13.0, 13.0, 10.375, 11.125, 7.125, 9.375
     ]
@@ -329,31 +335,31 @@ def create_inquiry_sheet(workbook, unmatched_products, source_sheet_name, inquir
     ws['A1'].alignment = center_alignment
     ws['A1'].border = thin_border
 
-    ws.merge_cells('I1:Q1')
+    ws.merge_cells('I1:R1')
     ws['I1'] = "研发提供"
     ws['I1'].fill = header_fill_2
     ws['I1'].font = header_font
     ws['I1'].alignment = center_alignment
     ws['I1'].border = thin_border
 
-    ws.merge_cells('R1:AE1')
-    ws['R1'] = "采购提供"
-    ws['R1'].fill = header_fill_3
-    ws['R1'].font = header_font
-    ws['R1'].alignment = center_alignment
-    ws['R1'].border = thin_border
+    ws.merge_cells('S1:AF1')
+    ws['S1'] = "采购提供"
+    ws['S1'].fill = header_fill_3
+    ws['S1'].font = header_font
+    ws['S1'].alignment = center_alignment
+    ws['S1'].border = thin_border
 
     # 设置第二行表头
     header_row2 = [
         "询价人", "询价日期", "产品编码", "产品名称", "规格 (mm)", "数量", "销售单位", "备注",
-        "产品类别", "售价", "售价单位", "", "报价日期", "表面处理", "重量属性 (kg)", "备注",
+        "产品类别", "售价", "售价单位", "", "报价日期", "表面处理", "重量属性 (kg)", "物料总重(kg)", "备注",
         "是否带图档附件", "产品归属项目", "采购员", "采购单价", "采购单位", "是否含税含运费",
         "供应商", "备注 (不同起订量不同单价之类)", "挤压模", "费用", "冲孔模", "费用",
         "最低采购量", "上机费", "其它备注"
     ]
 
     # 需要加粗的列
-    bold_columns = [3, 7, 9, 10, 20]
+    bold_columns = [3, 7, 9, 10, 21]
 
     for col_idx, value in enumerate(header_row2, start=1):
         if col_idx == 12:  # 跳过 L2（因为要与K列合并）
@@ -364,9 +370,9 @@ def create_inquiry_sheet(workbook, unmatched_products, source_sheet_name, inquir
         # 根据列所属区域设置背景色
         if col_idx <= 8:  # A-H 列：业务/研发沟通确定
             cell.fill = header_fill_1
-        elif col_idx <= 17:  # I-Q 列：研发提供
+        elif col_idx <= 18:  # I-R 列：研发提供
             cell.fill = header_fill_2
-        else:  # R-AE 列：采购提供
+        else:  # S-AF 列：采购提供
             cell.fill = header_fill_3
 
         if col_idx in bold_columns:
@@ -415,7 +421,22 @@ def create_inquiry_sheet(workbook, unmatched_products, source_sheet_name, inquir
         ws.cell(row=current_row, column=7, value=product.get('unit', ''))
         ws.cell(row=current_row, column=8, value='铝价数据库无法匹配')
 
-        for col in range(1, 32):
+        # O列: 单重（重量属性）— 查询物料库单重，按规格折算，回退 BOM 单重
+        _uw = lookup_unit_weight_from_material_db(
+            product.get('code', ''), product.get('spec', ''), product.get('weight', 0)
+        )
+        if _uw:
+            ws.cell(row=current_row, column=15, value=float(round(_uw, 4)))
+        # P列: 物料总重 = 单重 × 数量
+        if _uw and quantity:
+            try:
+                _qty_f = float(quantity)
+            except (TypeError, ValueError):
+                _qty_f = 0.0
+            if _qty_f > 0:
+                ws.cell(row=current_row, column=16, value=round(_uw * _qty_f, 2))
+
+        for col in range(1, 33):
             cell = ws.cell(row=current_row, column=col)
             cell.border = thin_border
             cell.alignment = left_alignment
@@ -588,6 +609,8 @@ def _create_pile_detail_sheet(workbook, pile_products, price_mapping,
                     'name': (_name_info.get('name') if _name_info else None) or product.get('name', ''),
                     'spec': product.get('spec', ''),
                     'quantity': product.get('quantity', 0),
+                    'weight': product.get('weight', 0),
+                    'preinstall': normalize_preinstall(product.get('preinstall')),
                     'issue_reason': '地桩产品无匹配价格',
                 })
 
@@ -686,12 +709,7 @@ def _create_pile_detail_sheet(workbook, pile_products, price_mapping,
 
     print(f"   🖼️ 地桩시트: 삽입 {image_found_count} 장, 미검출 {image_not_found_count} 장")
 
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.75, bottom=0.75, left=0.7, right=0.7, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'ko_normal')
 
     return {
         'sheet_name': sheet_name,
@@ -850,7 +868,7 @@ def create_quotation_from_dataframe(
     if sale_type == 'domestic':
         currency_number_format = '"¥" #,##0.00'
     else:
-        currency_number_format = '"US$" #,##0.00'
+        currency_number_format = '#,##0.00'
 
     a7_font = _KO_A7_FONT
     a7_fill = _KO_A7_FILL
@@ -1184,6 +1202,7 @@ def create_quotation_from_dataframe(
                 'spec': product_data.get('spec', ''),
                 'quantity': product_data.get('quantity', 0),
                 'unit': price_data.get('unit', '') if price_data else '',
+                'preinstall': normalize_preinstall(product_data.get('preinstall')),
                 'reasons': [],
                 'needs_inquiry': False,
             }
@@ -1269,7 +1288,7 @@ def create_quotation_from_dataframe(
             continue
 
         if price_info and has_valid_price_info(price_info):
-            unit_price = float(price_info['price'])
+            unit_price = get_temp_base_price(price_info, product, group or '韩语组', sale_type)
             price_unit = price_info.get('unit', '')
             matched_count += 1
             is_matched = True
@@ -1302,6 +1321,7 @@ def create_quotation_from_dataframe(
             display_unit_price = float(Decimal(str(unit_price)) * length_mm / Decimal('1000'))
         else:
             display_unit_price = unit_price
+        display_unit_price = apply_temp_preinstall_adjustment(price_info, display_unit_price, product, group or '韩语组', sale_type)
 
         if display_unit_price > 0:
             if ko_discount_in_detail and is_matched and is_complex:
@@ -1498,6 +1518,8 @@ def create_quotation_from_dataframe(
             'spec': _fwp.get('spec', ''),
             'quantity': _fwp.get('quantity', 0),
             'unit': _fwp_pi.get('unit', '') if _fwp_pi else '',
+            'weight': _fwp.get('weight', 0),
+            'preinstall': normalize_preinstall(_fwp.get('preinstall')),
             'issue_reason': '铝价数据库无法匹配',
         })
 
@@ -1629,7 +1651,7 @@ def create_quotation_from_dataframe(
             e_is_matched = False
 
             if e_price_info and has_valid_price_info(e_price_info):
-                e_unit_price = float(e_price_info['price'])
+                e_unit_price = get_temp_base_price(e_price_info, eproduct, group or '韩语组', sale_type)
                 e_price_unit = e_price_info.get('unit', '')
                 e_is_matched = True
 
@@ -1657,6 +1679,7 @@ def create_quotation_from_dataframe(
                 e_display_unit_price = float(Decimal(str(e_unit_price)) * e_length_mm / Decimal('1000'))
             else:
                 e_display_unit_price = e_unit_price
+            e_display_unit_price = apply_temp_preinstall_adjustment(e_price_info, e_display_unit_price, eproduct, group or '韩语组', sale_type)
 
             if e_display_unit_price > 0:
                 ws.cell(row=e_row, column=6, value=float(e_display_unit_price))
@@ -1709,6 +1732,8 @@ def create_quotation_from_dataframe(
                     'spec': eproduct.get('spec', ''),
                     'quantity': e_qty,
                     'unit': e_price_info.get('unit', '') if e_price_info else '',
+                    'weight': eproduct.get('weight', 0),
+                    'preinstall': normalize_preinstall(eproduct.get('preinstall')),
                     'issue_reason': '铝价数据库无法匹配',
                 })
 
@@ -1857,12 +1882,8 @@ def create_quotation_from_dataframe(
         ws.cell(row=1, column=col).border = no_border
 
     # ========== 页面设置 ==========
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.75, bottom=0.75, left=0.7, right=0.7, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'ko_normal')
+    ws.sheet_view.zoomScale = 50
 
     quotation_product_codes = set()
     for p in all_products:
@@ -1889,6 +1910,7 @@ def create_quotation_from_dataframe(
         'image_found_count': image_found_count,
         'image_not_found_count': image_not_found_count,
         'pile_products': pile_products,
+        'all_render_products': aluminum + carbon_steel + excluded_products,
         'sub_total_row': subtotal_row_1,
         'total_row': total_row_1,
         'detail_data_end_row': new_data_end_row,
@@ -2575,12 +2597,8 @@ def create_summary_quotation_sheet(workbook, all_quotation_results, matrix_data=
             ws.cell(row=r, column=c).border = b
 
     # ========== 页面设置 ==========
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.75, bottom=0.75, left=0.7, right=0.7, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'ko_normal')
+    ws.sheet_view.zoomScale = 100
 
     # 移到第一个位置
     sheet_names = workbook.sheetnames
@@ -2629,6 +2647,7 @@ def split_and_create_quotations(
         ko_discount_in_detail=True,
         need_total_qty=False,
         exclude_delete_options=None,
+        need_total_materials=False,
 ):
     """
     主函数：拆分多工作表BOM并生成韩语报价表（所有报价表在同一个Excel文件的不同Sheet中）
@@ -3334,7 +3353,7 @@ def split_and_create_quotations(
             _pp_code = _pp.get('code', '')
             _pp_qty = float(_pp.get('quantity', 0))
             _pp_pi = resolve_price_info(price_mapping, _pp_code, spec=_pp.get('spec', '')) if price_mapping else None
-            _pp_price = float(_pp_pi.get('price', 0)) if _pp_pi and has_valid_price_info(_pp_pi) else 0
+            _pp_price = get_temp_adjusted_base_price(_pp_pi, _pp, '韩语组', sale_type) if _pp_pi and has_valid_price_info(_pp_pi) else 0
             _pp_unit = _pp_pi.get('unit', '') if _pp_pi else ''
             _is_m = _pp_unit in ('米', 'm', 'M', 'meter', 'Meter', 'meters')
             if _is_m:
@@ -3382,6 +3401,29 @@ def split_and_create_quotations(
                 )
             except Exception as e:
                 print(f"   ❌ 报价单(견적서)生成失败: {e}")
+
+        if need_total_materials:
+            try:
+                create_total_materials_sheet(
+                    master_wb,
+                    all_quotation_results,
+                    price_mapping=price_mapping,
+                    sale_type=sale_type,
+                    coating_thickness=coating_thickness,
+                    lang='ko',
+                    need_weight_code=need_weight_code,
+                    need_total_qty=need_total_qty,
+                    discount_method='project',
+                    ko_discount_rate=ko_discount_rate,
+                    ko_steel_discount_rate=ko_steel_discount_rate,
+                    ko_purchased_discount_rate=ko_purchased_discount_rate,
+                    pile_products=pile_products_all,
+                    show_code=True,
+                )
+            except Exception as e:
+                import traceback
+                print(f"   ❌ 物料汇总页生成失败: {e}")
+                traceback.print_exc()
 
         input_basename = os.path.splitext(os.path.basename(input_file))[0]
         output_file = os.path.join(output_dir, f"{input_basename}_报价汇总.xlsx")

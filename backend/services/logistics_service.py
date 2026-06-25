@@ -80,6 +80,8 @@ BUILTIN_PROMPT = """你是一位专业的工业物流排柜图数据提取专家
 - 托盘序号（string）：如 "001#"、"002#"...，按顺序编号
 - 托盘编码（string）：如有则填，如 "P001"
 - 订单号（string）：该托盘对应的订单编号
+- 包装（string）：该托盘的包装类型，取值为 "铁托"、"木托"、"木框"、"木箱"、"纸箱"、"裸装" 之一（从排柜图中读取，默认"铁托"）
+- 体积（string）：托盘外尺寸长*宽*高，**格式必须为 <长*宽*高>（单位：米）**，如 "<2.9*0.7*0.6>"。务必带尖括号并用星号分隔，数值为米
 - 物料明细（array）：该托盘上装载的所有物料列表
   每个物料对象包含：
   - 物料编码（string）：如 "ASM-38160-01"、"KT-002" 等
@@ -111,9 +113,10 @@ BUILTIN_PROMPT = """你是一位专业的工业物流排柜图数据提取专家
 1. 仔细阅读PDF排柜图中的每一页，提取所有可见的托盘、物料、编码、数量信息
 2. 物料编码格式通常为 ASM-XXXXX-NN 或 KT-XXX 等
 3. 数量尽量保留原始单位（如"套"、"件"等）
-4. 如果信息不完整，仍然输出已知字段，缺失字段用空字符串""填充
-5. 确保输出的JSON格式严格正确，所有键名和字符串值用双引号
-6. 不要编造数据，只提取PDF中实际存在的信息"""
+4. 每个托盘必须填写"包装"和"体积"两个字段：包装类型从图上读取，体积为该托盘外尺寸长*宽*高（单位米），格式严格用 <长*宽*高>，如 <2.9*0.7*0.6>
+5. 如果信息不完整，仍然输出已知字段，缺失字段用空字符串""填充（体积字段除外，体积不可省略）
+6. 确保输出的JSON格式严格正确，所有键名和字符串值用双引号
+7. 不要编造数据，只提取PDF中实际存在的信息"""
 
 
 def load_prompt_from_docx():
@@ -393,7 +396,9 @@ def generate_stream(pdf_bytes, pdf_filename, pallet_qty, kit_qty, chinese_qty,
 ===英文单套预装明细===
 [JSON数组]
 ===中文包装清单参考===
-[JSON数组]"""
+[JSON数组]
+
+重要：托盘清单中每个托盘都必须包含"包装"和"体积"字段。"体积"格式必须为 <长*宽*高>（单位米），如 "<2.9*0.7*0.6>"，否则无法计算体积和尺寸。"""
 
     prompt = prompt_text + '\n\n' + user_input
     if pdf_text.strip():
@@ -808,19 +813,26 @@ def chat_stream(session_id, message):
 
             print(f"[CHAT] section_map keys: {list(section_map.keys())}")
 
+            # 托盘清单：优先解析 ===托盘清单=== 标记块；若 AI 未带标记，
+            # 自动从整段回复中检测含"托盘序号/托盘编码"的 JSON 并补充进托盘清单
+            pallet_new = []
             if '托盘清单' in section_map:
                 pallet_new = extract_array(section_map['托盘清单'], '托盘序号')
                 if not pallet_new:
                     pallet_new = extract_array(section_map['托盘清单'], '托盘编码')
-                print(f"[CHAT] pallet_new count: {len(pallet_new) if pallet_new else 0}")
-                if pallet_new:
-                    pallet = merge_json(
-                        os.path.join(output_new_dir, '托盘清单.json'),
-                        pallet_new, '托盘序号', '托盘编码')
-                    print(f"[CHAT] merged pallet count: {len(pallet)}")
-                    with open(os.path.join(output_new_dir, '托盘清单.json'), 'w', encoding='utf-8') as f:
-                        json.dump(pallet, f, ensure_ascii=False, indent=2)
-                    updated = True
+            if not pallet_new:
+                pallet_new = extract_array(full_reply, '托盘序号')
+                if not pallet_new:
+                    pallet_new = extract_array(full_reply, '托盘编码')
+            print(f"[CHAT] pallet_new count: {len(pallet_new) if pallet_new else 0}")
+            if pallet_new:
+                pallet = merge_json(
+                    os.path.join(output_new_dir, '托盘清单.json'),
+                    pallet_new, '托盘序号', '托盘编码')
+                print(f"[CHAT] merged pallet count: {len(pallet)}")
+                with open(os.path.join(output_new_dir, '托盘清单.json'), 'w', encoding='utf-8') as f:
+                    json.dump(pallet, f, ensure_ascii=False, indent=2)
+                updated = True
 
             if '英文单套预装明细' in section_map:
                 english_new = extract_array(section_map['英文单套预装明细'], '套装编码')

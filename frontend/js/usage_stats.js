@@ -56,6 +56,38 @@ document.addEventListener('DOMContentLoaded', async () => {
     const prevBtn = document.getElementById('usage-prev-btn');
     const nextBtn = document.getElementById('usage-next-btn');
     const exportBtn = document.getElementById('usage-export-btn');
+    const downloadBtn = document.getElementById('usage-download-btn');
+    const userGroupFilter = document.getElementById('usage-user-group-filter');
+    const userPeriodSel = document.getElementById('usage-user-period');
+
+    function getUserPeriodRange() {
+        const period = userPeriodSel ? userPeriodSel.value : 'today';
+        const pad = (n) => String(n).padStart(2, '0');
+        const now = new Date();
+        if (period === '30d') {
+            const start = new Date(now.getTime() - 29 * 24 * 60 * 60 * 1000);
+            start.setHours(0, 0, 0, 0);
+            return {
+                start: `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}T00:00:00`,
+                end: '',
+            };
+        }
+        if (period === '7d') {
+            const start = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
+            start.setHours(0, 0, 0, 0);
+            return {
+                start: `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}T00:00:00`,
+                end: '',
+            };
+        }
+        // today
+        return {
+            start: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T00:00:00`,
+            end: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T23:59:59`,
+        };
+    }
+
+    let _userStatsCache = [];
 
     let detailOffset = 0;
     const detailLimit = 50;
@@ -78,12 +110,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function loadUserDetail(username) {
         showUserPanel();
         const titleEl = document.getElementById('usage-user-title');
-        const displayName = (payload.data && payload.data.china_name) || username;
-        if (titleEl) titleEl.textContent = `${displayName} 使用情况`;
+        if (titleEl) titleEl.textContent = `${username} 使用情况`;
 
         try {
             const payload = await fetchUsageApi(`/admin/usage/user/${encodeURIComponent(username)}`);
             const d = payload.data || {};
+            const displayName = d.china_name || username;
+            if (titleEl) titleEl.textContent = `${displayName} 使用情况`;
 
             const setIfExists = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
             setIfExists('uq-total', d.total_count || 0);
@@ -192,35 +225,49 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function loadUserStats() {
         if (!userTableBody) return;
         try {
-            const payload = await fetchUsageApi('/admin/usage/by-user');
-            const rows = payload.data || [];
-            userTableBody.innerHTML = '';
-            rows.forEach(r => {
-                const successCount = r.success_count || 0;
-                const totalCount = r.total_count || 0;
-                const rate = totalCount > 0 ? Math.round((successCount / totalCount) * 100) : 0;
-                const row = document.createElement('tr');
-                row.style.cursor = 'pointer';
-                row.innerHTML = `
-                    <td><a href="javascript:void(0)" class="usage-user-link" data-username="${escapeHtml(r.username || '')}" style="color:#2563eb;text-decoration:none;font-weight:500;">${escapeHtml(r.china_name || r.username || '-')}</a></td>
-                    <td><span class="tag">${escapeHtml(r.group_name || '-')}</span></td>
-                    <td style="font-weight:600;">${totalCount}</td>
-                    <td>${rate}%</td>
-                    <td>${formatDuration(r.avg_duration_ms)}</td>
-                    <td style="font-size:12px;">${formatTime(r.last_active)}</td>
-                `;
-                row.addEventListener('click', (e) => {
-                    if (e.target.closest('.usage-user-link') || e.target === row || e.target.closest('td')) {
-                        loadUserDetail(r.username);
-                    }
-                });
-                userTableBody.appendChild(row);
-            });
-            if (rows.length === 0) {
-                userTableBody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#94a3b8;">暂无数据</td></tr>';
-            }
+            const range = getUserPeriodRange();
+            const qs = new URLSearchParams();
+            if (range.start) qs.set('start', range.start);
+            if (range.end) qs.set('end', range.end);
+            const query = qs.toString();
+            const payload = await fetchUsageApi(`/admin/usage/by-user${query ? '?' + query : ''}`);
+            _userStatsCache = payload.data || [];
+            renderUserStats();
         } catch (e) {
             console.error('usage by-user failed:', e);
+        }
+    }
+
+    function renderUserStats() {
+        if (!userTableBody) return;
+        const filterGroup = userGroupFilter ? userGroupFilter.value : '';
+        const rows = filterGroup
+            ? _userStatsCache.filter(r => (r.group_name || '') === filterGroup)
+            : _userStatsCache;
+        userTableBody.innerHTML = '';
+        rows.forEach(r => {
+            const successCount = r.success_count || 0;
+            const totalCount = r.total_count || 0;
+            const rate = totalCount > 0 ? Math.round((successCount / totalCount) * 100) : 0;
+            const row = document.createElement('tr');
+            row.style.cursor = 'pointer';
+            row.innerHTML = `
+                <td><a href="javascript:void(0)" class="usage-user-link" data-username="${escapeHtml(r.username || '')}" style="color:#2563eb;text-decoration:none;font-weight:500;">${escapeHtml(r.china_name || r.username || '-')}</a></td>
+                <td><span class="tag">${escapeHtml(r.group_name || '-')}</span></td>
+                <td style="font-weight:600;">${totalCount}</td>
+                <td>${rate}%</td>
+                <td>${formatDuration(r.avg_duration_ms)}</td>
+                <td style="font-size:12px;">${formatTime(r.last_active)}</td>
+            `;
+            row.addEventListener('click', (e) => {
+                if (e.target.closest('.usage-user-link') || e.target === row || e.target.closest('td')) {
+                    loadUserDetail(r.username);
+                }
+            });
+            userTableBody.appendChild(row);
+        });
+        if (rows.length === 0) {
+            userTableBody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#94a3b8;">暂无数据</td></tr>';
         }
     }
 
@@ -332,6 +379,35 @@ document.addEventListener('DOMContentLoaded', async () => {
             link.click();
             document.body.removeChild(link);
         });
+    }
+
+    if (downloadBtn) {
+        downloadBtn.addEventListener('click', () => {
+            const params = new URLSearchParams();
+            const g = filterGroup ? filterGroup.value : '';
+            const s = filterStatus ? filterStatus.value : '';
+            const start = filterStart ? filterStart.value : '';
+            const end = filterEnd ? filterEnd.value : '';
+            if (g) params.set('group', g);
+            if (s) params.set('status', s);
+            if (start) params.set('start', start + 'T00:00:00');
+            if (end) params.set('end', end + 'T23:59:59');
+            const url = `${USAGE_API}/admin/usage/export-details?${params.toString()}`;
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = '报价详细日志.xlsx';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+    }
+
+    if (userGroupFilter) {
+        userGroupFilter.addEventListener('change', renderUserStats);
+    }
+
+    if (userPeriodSel) {
+        userPeriodSel.addEventListener('change', loadUserStats);
     }
 
     let usageLoaded = false;

@@ -18,6 +18,7 @@ from backend.repositories.fence_gate_material_repository import (
     delete_material,
     get_material,
     list_all_codes,
+    list_all_prices,
     list_all_records_raw,
     list_image_records,
     list_materials,
@@ -26,7 +27,7 @@ from backend.repositories.fence_gate_material_repository import (
     VALID_CATEGORIES,
     TABLE,
 )
-from backend.services.auth_service import ensure_permission
+from backend.services.auth_service import ensure_permission, get_current_account
 
 
 fence_material_bp = Blueprint('fence_material', __name__, url_prefix='/api/fence-materials')
@@ -148,6 +149,12 @@ def columns_route():
     ensure_permission('database')
     columns = list_table_columns()
     return jsonify({'success': True, 'columns': columns})
+
+
+@fence_material_bp.get('/prices')
+def prices_route():
+    get_current_account()
+    return jsonify({'success': True, 'data': list_all_prices()})
 
 
 @fence_material_bp.get('')

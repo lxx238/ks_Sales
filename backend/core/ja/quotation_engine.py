@@ -1,6 +1,7 @@
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.worksheet.page import PageMargins
+from backend.core.print_settings import apply_print_setup
 from openpyxl.drawing.image import Image as XlImage
 from openpyxl.utils import get_column_letter
 import os
@@ -9,7 +10,7 @@ from decimal import Decimal
 
 from backend.core.shared.text_utils import _CJK_RE, _strip_cjk_spec, normalize_lookup_code
 from backend.core.shared.price_utils import resolve_price_info, has_valid_price_info, round_to_2_decimal
-from backend.core.shared.product_utils import _is_valid_product_code
+from backend.core.shared.product_utils import _is_valid_product_code, normalize_preinstall
 from backend.core.shared.weight_utils import extract_length_from_spec
 from backend.core.material_translate import translate_material
 
@@ -287,6 +288,8 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
                     'spec': product.get('spec', ''),
                     'material': raw_material,
                     'quantity': quantity * _detail_table_qty,
+                    'weight': product.get('weight', 0),
+                    'preinstall': normalize_preinstall(product.get('preinstall')),
                 })
 
         is_meter = price_unit in ['米', 'm', 'M', 'meter', 'Meter', 'METERS', 'meters']
@@ -479,12 +482,7 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
 
     _apply_outer_border(ws, 1, sub_row, 1, max_col)
 
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.75, bottom=0.75, left=0.7, right=0.7, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'ja')
 
     return {
         'sheet_name': sheet_name,
@@ -1460,11 +1458,6 @@ def create_summary_sheet(workbook, detail_results, matrix_data=None,
         idx = sheet_names.index('合計')
         workbook.move_sheet('合計', offset=-idx)
 
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.75, bottom=0.75, left=0.7, right=0.7, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'ja')
 
     return ws.title

@@ -51,6 +51,8 @@
     let _fileInputs = [];
     var confirmedEstFenceData = null;
     var confirmedNvFenceGateData = null;
+    var _fenceGatePricesLoaded = false;
+    var matSelectionState = {};
 
     const HTML_TEMPLATE = `
 <section class="section" id="upload">
@@ -109,6 +111,10 @@
         <input type="radio" name="en-lang" value="es" style="width: 16px; height: 16px;">
         <span>Español</span>
       </label>
+      <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+        <input type="radio" name="en-lang" value="zh" style="width: 16px; height: 16px;">
+        <span>中文</span>
+      </label>
     </div>
   </div>
   <p>统一使用标准定价表与 BOM 表进行匹配。若已设置全局价格表，日常只需上传 BOM 表即可。</p>
@@ -132,16 +138,45 @@
         <span id="price-table-info"></span>
       </div>
       <div id="price-report-area" class="muted" style="margin-top: 8px; padding: 8px; background: #e0f2fe; border-radius: 8px; display: none;">
-        <div class="toolbar">
+  <div class="card" id="print-settings-card" style="margin-top:10px;padding:10px 14px;">
+    <div id="print-settings-row" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:13px;color:var(--text);">
+      <span style="font-weight:600;">🖨️ 打印设置（个人习惯）</span>
+      <span id="print-case-label" style="font-size:12px;color:var(--muted);"></span>
+      <label style="display:flex;align-items:center;gap:4px;">方向
+        <select id="print-orientation" style="padding:3px 6px;">
+          <option value="portrait">纵向</option>
+          <option value="landscape">横向</option>
+        </select>
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;">缩放
+        <select id="print-fit-mode" style="padding:3px 6px;">
+          <option value="fit_width">所有列一页</option>
+          <option value="fit_one">全部一页</option>
+        </select>
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;">水平居中
+        <input type="checkbox" id="print-centered" style="width:16px;height:16px;">
+      </label>
+      <span style="color:var(--muted);">边距(英寸):</span>
+      <label style="display:flex;align-items:center;gap:3px;">上<input type="number" id="print-mt" step="0.05" min="0" style="width:52px;padding:3px 4px;"></label>
+      <label style="display:flex;align-items:center;gap:3px;">下<input type="number" id="print-mb" step="0.05" min="0" style="width:52px;padding:3px 4px;"></label>
+      <label style="display:flex;align-items:center;gap:3px;">左<input type="number" id="print-ml" step="0.05" min="0" style="width:52px;padding:3px 4px;"></label>
+      <label style="display:flex;align-items:center;gap:3px;">右<input type="number" id="print-mr" step="0.05" min="0" style="width:52px;padding:3px 4px;"></label>
+      <button class="btn" id="print-restore-btn" style="margin-left:auto;">恢复默认</button>
+      <span id="print-status" style="font-size:12px;color:var(--muted);"></span>
+    </div>
+  </div>
+  <div class="toolbar">
           <button class="btn primary" id="price-download-report-btn">下载汇总报价表</button>
           <button class="btn" id="price-download-inquiry-btn" style="display: none;">下载询价表</button>
+          <button class="btn primary" id="price-submit-inquiry-btn" style="display: none;">提交询价项到询价价格查询</button>
         </div>
         <div id="price-inquiry-remark-wrap" style="display:none; margin-top:10px;">
           <label style="font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:4px;">询价备注</label>
-          <textarea id="price-inquiry-remark-input" rows="3" placeholder="请输入询价备注信息（选填），将随邮件一并发送给供应商" style="width:100%;max-width:600px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;resize:vertical;font-family:inherit;"></textarea>
+          <textarea id="price-inquiry-remark-input" rows="3" placeholder="请输入询价备注信息（选填）" style="width:100%;max-width:600px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;resize:vertical;font-family:inherit;"></textarea>
           <div style="margin-top:6px;">
             <label style="font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:4px;">附件</label>
-            <input type="file" id="price-inquiry-attachment-input" multiple style="font-size:13px;">
+            <label class="btn" style="cursor:pointer;display:inline-block;margin-bottom:6px;">上传附件<input type="file" id="price-inquiry-attachment-input" multiple style="display:none;"></label>
             <div id="price-inquiry-attachment-list" style="margin-top:4px;font-size:12px;color:var(--muted);"></div>
           </div>
         </div>
@@ -266,6 +301,11 @@
         <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-bottom: 4px;">
           <span style="width: 120px;">碳钢折扣(%)</span>
           <input type="number" id="ko-steel-discount-rate" value="84" step="1" min="0" max="100" style="width: 80px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+          <span style="width: 110px; margin-left: 12px;">碳钢包装</span>
+          <select id="ko-steel-pack" style="width: 110px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+            <option value="jybz" selected>简易包装</option>
+            <option value="tietuo">铁托</option>
+          </select>
         </div>
         <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-bottom: 4px;">
           <span style="width: 120px;">外购件折扣(%)</span>
@@ -278,6 +318,12 @@
         <div id="ko-consumption-tax-row" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-bottom: 4px;">
           <span style="width: 120px;">消费税(%)</span>
           <input type="number" id="ko-consumption-tax" value="10" step="0.1" min="0" style="width: 80px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+        </div>
+        <div class="form-row" style="margin-top: 10px;">
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text);">
+            <input type="checkbox" id="ko-need-total-materials" style="width: 16px; height: 16px;">
+            <span>添加材料总表 (物料汇总)</span>
+          </label>
         </div>
 
       </div>
@@ -295,6 +341,14 @@
           <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
             <input type="radio" name="normal-mitsumori-condition" value="DDP" style="width: 16px; height: 16px;">
             <span>DDP</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+            <input type="radio" name="normal-mitsumori-condition" value="CIF_DDP" style="width: 16px; height: 16px;">
+            <span>CIF+DDP</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+            <input type="radio" name="normal-mitsumori-condition" value="TEST" style="width: 16px; height: 16px;">
+            <span>测试</span>
           </label>
         </div>
         <div style="font-size: 13px; color: var(--text); margin-top: 10px; margin-bottom: 6px; font-weight: 600;">税率设置</div>
@@ -322,6 +376,18 @@
           <span style="width: 120px;">運賃</span>
           <input type="number" id="normal-shipping-fee" value="0" step="1" style="width: 100px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
           <span>USD</span>
+        </label>
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-bottom: 4px;">
+          <span style="width: 120px;">取引条件</span>
+          <select id="normal-trade-condition" style="width: 280px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+            <option value="取引基本契約書に基づく">取引基本契約書に基づく</option>
+            <option value="納品後翌月末支払">納品後翌月末支払</option>
+          </select>
+        </label>
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-bottom: 4px;">
+          <span style="width: 120px;">删除重量</span>
+          <input type="checkbox" id="normal-remove-weight" style="width: 16px; height: 16px;">
+          <span style="font-size: 12px; color: var(--text-muted);">生成时移除物料明细的重量列(G列)</span>
         </label>
       </div>
       <div data-group-only="日语组" id="nv-params-panel" style="display: none; margin-top: 10px; padding: 12px; background: #f0fdfa; border-radius: 10px; border: 1px solid #b2dfdb;">
@@ -459,6 +525,11 @@
         <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-bottom: 4px;">
           <span style="width: 120px;">碳钢折扣(%)</span>
           <input type="number" id="nv-steel-discount-rate" value="84" step="1" min="0" max="100" style="width: 80px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+          <span style="width: 110px; margin-left: 12px;">碳钢包装</span>
+          <select id="nv-steel-pack" style="width: 110px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+            <option value="jybz" selected>简易包装</option>
+            <option value="tietuo">铁托</option>
+          </select>
         </label>
         <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-bottom: 4px;">
           <span style="width: 120px;">外购件折扣(%)</span>
@@ -710,11 +781,69 @@
           <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-bottom: 4px;">
             <span style="width: 120px;">碳钢折扣(%)</span>
             <input type="number" id="en-steel-discount-rate" value="84" step="1" min="0" max="100" style="width: 80px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+            <span style="width: 110px; margin-left: 12px;">碳钢包装</span>
+            <select id="en-steel-pack" style="width: 110px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+              <option value="jybz" selected>简易包装</option>
+              <option value="tietuo">铁托</option>
+            </select>
           </div>
           <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-bottom: 4px;">
             <span style="width: 120px;">外购件折扣(%)</span>
             <input type="number" id="en-purchased-discount-rate" value="94" step="1" min="0" max="100" style="width: 80px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
           </div>
+        </div>
+      </div>
+      <div data-group-only="亚太组" id="ap-params-panel" style="margin-top: 10px; padding: 12px; background: #f0fdfa; border-radius: 10px; border: 1px solid #b2dfdb;">
+        <div data-group-only="亚太组" style="margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 13px; font-weight: 600; color: var(--text);">表面处理：</span>
+          <button class="btn primary" id="btn-ap-coating-10" style="padding: 3px 12px; font-size: 12px; border-radius: 6px;">10um</button>
+          <button class="btn" id="btn-ap-coating-15" style="padding: 3px 12px; font-size: 12px; border-radius: 6px;">15um</button>
+          <button class="btn" id="btn-ap-coating-18" style="padding: 3px 12px; font-size: 12px; border-radius: 6px;">18um</button>
+        </div>
+        <div style="font-size: 13px; color: var(--text); margin-bottom: 6px; font-weight: 600;">贸易方式</div>
+        <div id="ap-trade-method-btns" style="display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text); flex-wrap: wrap; margin-bottom: 10px;">
+          <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+            <input type="radio" name="ap-trade-method" value="EXW" checked style="width: 16px; height: 16px;">
+            <span>EXW</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+            <input type="radio" name="ap-trade-method" value="FOB" style="width: 16px; height: 16px;">
+            <span>FOB</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+            <input type="radio" name="ap-trade-method" value="CIF" style="width: 16px; height: 16px;">
+            <span>CIF</span>
+          </label>
+        </div>
+        <div style="font-size: 13px; color: var(--text); margin-bottom: 6px; font-weight: 600;">折扣率设置</div>
+        <div style="display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text); margin-bottom: 4px;">
+          <div style="display: flex; align-items: center; gap: 4px;">
+            <span>公司折扣(%)</span>
+            <input type="number" id="ap-company-discount" value="74" step="1" min="0" max="100" style="width: 60px; padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+          </div>
+          <span style="font-weight: 600;">+</span>
+          <div style="display: flex; align-items: center; gap: 4px;">
+            <span>开发服务费(%)</span>
+            <input type="number" id="ap-commission" value="0" step="1" min="0" max="100" style="width: 60px; padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+          </div>
+          <span style="font-weight: 600;">=</span>
+          <div style="display: flex; align-items: center; gap: 4px;">
+            <span>铝价折扣(%)</span>
+            <input type="number" id="ap-discount-rate" value="74" readonly style="width: 60px; padding: 4px 6px; border: 1px solid #94a3b8; border-radius: 4px; font-size: 13px; background: #f1f5f9; color: #0f172a; font-weight: 600;">
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-bottom: 4px;">
+          <span style="width: 120px;">碳钢折扣(%)</span>
+          <input type="number" id="ap-steel-discount-rate" value="84" step="1" min="0" max="100" style="width: 80px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+          <span style="width: 110px; margin-left: 12px;">碳钢包装</span>
+          <select id="ap-steel-pack" style="width: 110px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+            <option value="jybz" selected>简易包装</option>
+            <option value="tietuo">铁托</option>
+          </select>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-bottom: 4px;">
+          <span style="width: 120px;">外购件折扣(%)</span>
+          <input type="number" id="ap-purchased-discount-rate" value="94" step="1" min="0" max="100" style="width: 80px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
         </div>
       </div>
       <div class="form-row" id="weight-code-row" data-group-only="日语组,韩语组" style="margin-top: 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
@@ -773,7 +902,7 @@
         ⚠️ 请先上传物料定价表
       </div>
     </div>
-    <div class="card">
+    <div class="card" data-group-only="韩语组,日语组,英语组">
       <h3>上传信息表</h3>
       <div class="muted">选填：上传信息表文件，作为和 BOM 表并列的项目输入文件。</div>
       <div data-group-only="韩语组" style="margin-top: 10px; display: flex; align-items: center; gap: 8px;">
@@ -833,7 +962,7 @@
     <div class="card">
       <h3>联系信息</h3>
       <div class="muted">用于报价汇总表头部信息填写。选择负责人后自动填入。</div>
-      <div data-group-only="韩语组" style="margin-top: 10px; padding: 8px; background: #f0fdfa; border-radius: 8px; border: 1px solid #b2dfdb;">
+      <div data-group-only="韩语组,亚太组" style="margin-top: 10px; padding: 8px; background: #f0fdfa; border-radius: 8px; border: 1px solid #b2dfdb;">
         <div style="font-size: 13px; color: var(--text); margin-bottom: 6px; font-weight: 600;">选择负责人</div>
         <div id="contact-list" style="display: flex; flex-wrap: wrap; gap: 8px;">加载中...</div>
         <div id="contact-preview" style="margin-top: 10px; padding: 10px; background: #fff; border-radius: 8px; font-size: 13px; color: var(--text); display: none; border: 1px solid #e2e8f0;">
@@ -844,7 +973,7 @@
           <div id="contact-preview-fax"><span style="color:#64748b;">Fax：</span></div>
         </div>
       </div>
-      <div class="form-actions" data-group-only="韩语组" style="margin-top: 8px;">
+      <div class="form-actions" data-group-only="韩语组,亚太组" style="margin-top: 8px;">
         <button class="btn" type="button" id="contact-clear-btn">清除选择</button>
       </div>
       <div data-group-only="日语组" style="margin-top: 10px; padding: 8px; background: #f0fdfa; border-radius: 8px; border: 1px solid #b2dfdb;">
@@ -957,6 +1086,8 @@
   </div>
   <div class="toolbar">
     <button class="btn" id="generate-report-btn">分析并生成报表</button>
+    <button class="btn" id="save-prefs-btn" style="margin-left:8px;">保存我的习惯</button>
+    <span id="save-prefs-status" style="font-size:13px;color:var(--muted);margin-left:8px;"></span>
   </div>
   <div class="status-box" style="display: none;"></div>
   <div id="report-area" class="report-box" style="display: none; margin-top: 16px;">
@@ -965,14 +1096,15 @@
     <div class="toolbar">
       <button class="btn primary" id="download-report-btn">下载汇总报价表</button>
       <button class="btn" id="download-inquiry-btn" style="display: none;">下载询价表</button>
+      <button class="btn primary" id="submit-inquiry-btn" style="display: none;">提交询价项到询价价格查询</button>
       <button class="btn" id="download-missing-image-btn" style="display: none;">存入询图列表</button>
     </div>
     <div id="inquiry-remark-wrap" style="display:none; margin-top:10px;">
       <label style="font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:4px;">询价备注</label>
-      <textarea id="inquiry-remark-input" rows="3" placeholder="请输入询价备注信息（选填），将随邮件一并发送给供应商" style="width:100%;max-width:600px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;resize:vertical;font-family:inherit;"></textarea>
+      <textarea id="inquiry-remark-input" rows="3" placeholder="请输入询价备注信息（选填）" style="width:100%;max-width:600px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;resize:vertical;font-family:inherit;"></textarea>
       <div style="margin-top:6px;">
         <label style="font-size:13px;font-weight:600;color:var(--text);display:block;margin-bottom:4px;">附件</label>
-        <input type="file" id="inquiry-attachment-input" multiple style="font-size:13px;">
+        <label class="btn" style="cursor:pointer;display:inline-block;margin-bottom:6px;">上传附件<input type="file" id="inquiry-attachment-input" multiple style="display:none;"></label>
         <div id="inquiry-attachment-list" style="margin-top:4px;font-size:12px;color:var(--muted);"></div>
       </div>
     </div>
@@ -1002,6 +1134,7 @@
         elements.reportInfo = document.getElementById('report-info');
         elements.downloadReportButton = document.getElementById('download-report-btn');
         elements.inquiryDownloadReportButton = document.getElementById('download-inquiry-btn');
+        elements.inquirySubmitButton = document.getElementById('submit-inquiry-btn');
         elements.inquiryListContainer = document.getElementById('inquiry-list-container');
         elements.inquiryRemarkWrap = document.getElementById('inquiry-remark-wrap');
         elements.inquiryRemarkInput = document.getElementById('inquiry-remark-input');
@@ -1015,6 +1148,7 @@
         elements.priceReportInfo = document.getElementById('price-report-info');
         elements.priceDownloadReportButton = document.getElementById('price-download-report-btn');
         elements.priceInquiryDownloadReportButton = document.getElementById('price-download-inquiry-btn');
+        elements.priceInquirySubmitButton = document.getElementById('price-submit-inquiry-btn');
         elements.imageFolderInput = document.getElementById('image-folder-input');
         elements.imageFolderButton = document.getElementById('image-folder-btn');
         elements.imageFolderStatus = document.getElementById('image-folder-status');
@@ -1336,18 +1470,25 @@
         if (!calc) return;
         var fgBody = document.getElementById('fence-gate-body');
         if (fgBody && fgBody.style.display === 'none') return;
-        var allCards = [];
-        var fenceInputs = getAllFenceInputs();
-        fenceInputs.forEach(function(input) {
-            var result = calc.buildFenceQuoteByStyle(input.style, input.totalLength, input.cornerQty, input.wireDiameter, input.surface);
-            if (result.summaryCards) allCards = allCards.concat(result.summaryCards);
-        });
-        var gateInputs = getAllGateInputs();
-        gateInputs.forEach(function(input) {
-            var result = calc.buildGateQuoteByStyle(input.gateStyle, input.gateQty);
-            if (result.summaryCards) allCards = allCards.concat(result.summaryCards);
-        });
-        renderQuickQuoteCards(elements.quickFenceGateSummary, allCards);
+        var renderCore = function () {
+            var allCards = [];
+            var fenceInputs = getAllFenceInputs();
+            fenceInputs.forEach(function(input) {
+                var result = calc.buildFenceQuoteByStyle(input.style, input.totalLength, input.cornerQty, input.wireDiameter, input.surface);
+                if (result.summaryCards) allCards = allCards.concat(result.summaryCards);
+            });
+            var gateInputs = getAllGateInputs();
+            gateInputs.forEach(function(input) {
+                var result = calc.buildGateQuoteByStyle(input.gateStyle, input.gateQty);
+                if (result.summaryCards) allCards = allCards.concat(result.summaryCards);
+            });
+            renderQuickQuoteCards(elements.quickFenceGateSummary, allCards);
+        };
+        if (typeof calc.ready === 'function' && !_fenceGatePricesLoaded) {
+            _fenceGatePricesLoaded = true;
+            Promise.resolve(calc.ready()).then(function () { renderCore(); }).catch(function () {});
+        }
+        renderCore();
     }
 
     function renderQuickFenceSummary() { renderNvSummary(); }
@@ -1454,6 +1595,7 @@
         var currentGroup = typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '韩语组';
         var isKorean = currentGroup === '韩语组';
         var isEnglish = currentGroup === '英语组';
+        var isAp = currentGroup === '亚太组';
 
         var existingCards = Array.from(grid.children).filter(function (child) {
             return child && child.classList && child.classList.contains('card');
@@ -1490,7 +1632,31 @@
         var ordered;
         var usedCards;
 
-        if (isKorean || isEnglish) {
+        if (isAp) {
+            grid.classList.add('ko-no-fence');
+            combinedCard.style.minHeight = 'auto';
+            // 亚太组：删除信息表卡片（仅 BOM 上传流程），不再隐藏
+            if (infoCard.parentNode === combinedCard) {
+                combinedCard.removeChild(infoCard);
+            }
+            // 贸易方式 / 表面处理 移入 BOM 卡片下方
+            var apPanel = containerEl.querySelector('#ap-params-panel');
+            if (apPanel && bomCard) {
+                apPanel.style.gridColumn = '';
+                apPanel.style.marginTop = '14px';
+                apPanel.style.background = '#f7faf9';
+                bomCard.appendChild(apPanel);
+            }
+            ordered = [combinedCard, bomCard];
+            if (priceCard) ordered.push(priceCard);
+            if (imageCard) ordered.push(imageCard);
+            usedCards = new Set([priceCard, bomCard, infoCard, contactCard, imageCard, apPanel]);
+            existingCards.forEach(function (card) {
+                if (!usedCards.has(card)) {
+                    ordered.push(card);
+                }
+            });
+        } else if (isKorean || isEnglish) {
             grid.classList.add('ko-no-fence');
             var fenceCardKo = containerEl.querySelector('.ja-standard-fence-gate-card');
             var estFenceCardKo = containerEl.querySelector('.ja-external-fence-card');
@@ -1538,6 +1704,13 @@
     }
 
     function bindEvents() {
+        var savePrefsBtn = document.getElementById('save-prefs-btn');
+        if (savePrefsBtn) {
+            savePrefsBtn.addEventListener('click', function () {
+                saveMyPreferences();
+            });
+        }
+
         const bomInput = document.createElement('input');
         bomInput.type = 'file';
         bomInput.accept = '.xlsx,.xls';
@@ -1584,6 +1757,20 @@
         if (koCompanyDiscountEl) koCompanyDiscountEl.addEventListener('input', updateKoDiscountRate);
         if (koCommissionEl) koCommissionEl.addEventListener('input', updateKoDiscountRate);
         updateKoDiscountRate();
+
+        var apCompanyDiscountEl = document.getElementById('ap-company-discount');
+        var apCommissionEl = document.getElementById('ap-commission');
+        var apDiscountRateResultEl = document.getElementById('ap-discount-rate');
+        function updateApDiscountRate() {
+            var company = parseFloat(apCompanyDiscountEl ? apCompanyDiscountEl.value : 0) || 0;
+            var commission = parseFloat(apCommissionEl ? apCommissionEl.value : 0) || 0;
+            if (apDiscountRateResultEl) {
+                apDiscountRateResultEl.value = company + commission;
+            }
+        }
+        if (apCompanyDiscountEl) apCompanyDiscountEl.addEventListener('input', updateApDiscountRate);
+        if (apCommissionEl) apCommissionEl.addEventListener('input', updateApDiscountRate);
+        updateApDiscountRate();
 
         var nvCompanyDiscountEl = document.getElementById('nv-company-discount');
         var nvCommissionEl = document.getElementById('nv-commission');
@@ -1944,9 +2131,33 @@
             }
         });
 
+        var apCoatingButtons = [
+            { id: 'btn-ap-coating-10', value: 10 },
+            { id: 'btn-ap-coating-15', value: 15 },
+            { id: 'btn-ap-coating-18', value: 18 }
+        ];
+        apCoatingButtons.forEach(function (item) {
+            var btn = document.getElementById(item.id);
+            if (btn) {
+                btn.addEventListener('click', function () {
+                    state.coatingThickness = item.value;
+                    apCoatingButtons.forEach(function (b) {
+                        var el = document.getElementById(b.id);
+                        if (el) el.classList.remove('primary');
+                    });
+                    btn.classList.add('primary');
+                });
+            }
+        });
+
         var koMatBtnGroups = containerEl ? containerEl.querySelectorAll('.ko-mat-btns') : [];
         koMatBtnGroups.forEach(function (group) {
             var btns = group.querySelectorAll('button');
+            var matGroup = group.getAttribute('data-mat-group') || '';
+            var _initBtn = group.querySelector('button.active-blue, button.active-red, button.active-green, button.active-orange');
+            if (_initBtn && matGroup) {
+                matSelectionState[matGroup] = _initBtn.getAttribute('data-action');
+            }
             btns.forEach(function (btn) {
                 btn.addEventListener('click', function () {
                     btns.forEach(function (b) {
@@ -1957,7 +2168,20 @@
                     else if (action === 'delete') btn.classList.add('active-red');
                     else if (action === 'include') btn.classList.add('active-green');
                     else if (action === 'include_below') btn.classList.add('active-orange');
-                    var matGroup = group.getAttribute('data-mat-group') || '';
+                    if (matGroup) {
+                        matSelectionState[matGroup] = action;
+                    }
+                    if (matGroup.indexOf('cap') >= 0) {
+                        console.log('[DEBUG_CAP_CLICK] group=' + matGroup + ' action=' + action);
+                        try {
+                            var _base = (typeof KS_API_BASE_URL !== 'undefined') ? KS_API_BASE_URL : '/api';
+                            fetch(_base + '/debug-cap-click', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ group: matGroup, action: action })
+                            }).catch(function () {});
+                        } catch (e) {}
+                    }
                     if (matGroup.indexOf('ja_nv_handle_') === 0) {
                         var spareRow = containerEl.querySelector('[data-spare-depends="' + matGroup + '"]');
                         if (spareRow) {
@@ -2256,7 +2480,7 @@
 
         var nvConfirmBtn = document.getElementById('nv-fence-gate-confirm-btn');
         if (nvConfirmBtn) {
-            nvConfirmBtn.addEventListener('click', function () {
+            nvConfirmBtn.addEventListener('click', async function () {
                 if (confirmedNvFenceGateData) {
                     confirmedNvFenceGateData = null;
                     nvConfirmBtn.textContent = '确认';
@@ -2270,6 +2494,9 @@
                 }
                 var calc = getFenceGateCalculator();
                 if (!calc) return;
+                if (typeof calc.ready === 'function') {
+                    try { await calc.ready(); } catch (e) {}
+                }
                 var fenceInputs = getAllFenceInputs();
                 var gateInputs = getAllGateInputs();
                 var fenceDataList = [];
@@ -2323,7 +2550,7 @@
 
     function ensureInquiryRequesterControls() {
         var group = typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '韩语组';
-        if (group !== '韩语组') return;
+        if (group !== '韩语组' && group !== '亚太组') return;
         loadContactsAndInquiryRequester();
     }
 
@@ -2332,7 +2559,8 @@
         if (!container) return;
 
         var contactsApiUrl = typeof KS_API_BASE_URL !== 'undefined' ? KS_API_BASE_URL : buildApiBaseUrl();
-        fetch(contactsApiUrl + '/ucontacts?group=' + encodeURIComponent('韩语组'), { credentials: 'same-origin' })
+        var _contactGroup = typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '韩语组';
+        fetch(contactsApiUrl + '/ucontacts?group=' + encodeURIComponent(_contactGroup), { credentials: 'same-origin' })
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (!data.success || !Array.isArray(data.data)) {
@@ -2522,15 +2750,24 @@
         }
 
         if (elements.bomUploadHint) {
-            elements.bomUploadHint.style.display = 'block';
-            elements.bomUploadHint.style.background = '#fef3c7';
-            elements.bomUploadHint.style.color = '#92400e';
-            elements.bomUploadHint.textContent = '⚠️ 请先上传信息表，再上传 BOM 表。';
+            var _apGroup = typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '韩语组';
+            if (_apGroup === '亚太组') {
+                elements.bomUploadHint.style.display = 'block';
+                elements.bomUploadHint.style.background = '#ecfeff';
+                elements.bomUploadHint.style.color = '#155e75';
+                elements.bomUploadHint.textContent = '请上传 BOM 表即可生成报价。';
+            } else {
+                elements.bomUploadHint.style.display = 'block';
+                elements.bomUploadHint.style.background = '#fef3c7';
+                elements.bomUploadHint.style.color = '#92400e';
+                elements.bomUploadHint.textContent = '⚠️ 请先上传信息表，再上传 BOM 表。';
+            }
         }
     }
 
     async function uploadBOMFile(file) {
-        if (!state.matrixFileId) {
+        var _bomGroup = typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '韩语组';
+        if (!state.matrixFileId && _bomGroup !== '亚太组') {
             showStatus('请先上传信息表，再上传 BOM 表。', 'error');
             return;
         }
@@ -2842,52 +3079,83 @@
             }
             requestBody.ko_exclude_options = excludeOptions;
 
-            var excludeOptions = {};
-            var deleteOptions = {};
-            var jaMatGroups = containerEl ? containerEl.querySelectorAll('.ko-mat-btns[data-mat-group^="ja_"]') : [];
-            jaMatGroups.forEach(function (group) {
-                var matGroup = group.getAttribute('data-mat-group');
-                var activeBtn = group.querySelector('button.active-blue, button.active-red, button.active-green, button.active-orange');
-                if (!activeBtn) return;
-                var action = activeBtn.getAttribute('data-action');
-                if (matGroup.indexOf('ja_nv_handle_') === 0) {
-                    var handleKey = matGroup.replace(/^ja_nv_handle_/, '');
-                    if (action === 'delete') {
-                        if (handleKey === 'cap') {
-                            deleteOptions.rail_cap = true;
-                            deleteOptions.beam_cap = true;
-                        } else {
-                            deleteOptions[handleKey] = true;
-                        }
+            function _readAction(matGroup) {
+                var action = matSelectionState[matGroup];
+                if (action) return action;
+                var btn = containerEl.querySelector('.ko-mat-btns[data-mat-group="' + matGroup + '"] button.active-blue, .ko-mat-btns[data-mat-group="' + matGroup + '"] button.active-red, .ko-mat-btns[data-mat-group="' + matGroup + '"] button.active-green, .ko-mat-btns[data-mat-group="' + matGroup + '"] button.active-orange');
+                return btn ? btn.getAttribute('data-action') : '';
+            }
+
+            function _setCap(opts) {
+                opts.rail_cap = true;
+                opts.beam_cap = true;
+            }
+
+            function collectNvMatOptions() {
+                var del = {};
+                var exc = {};
+                var handleGroups = containerEl ? containerEl.querySelectorAll('.ko-mat-btns[data-mat-group^="ja_nv_handle_"]') : [];
+                handleGroups.forEach(function (group) {
+                    var handleKey = group.getAttribute('data-mat-group').replace(/^ja_nv_handle_/, '');
+                    if (_readAction(group.getAttribute('data-mat-group')) === 'delete') {
+                        if (handleKey === 'cap') { _setCap(del); } else { del[handleKey] = true; }
                     }
-                } else if (matGroup.indexOf('ja_est_') === 0) {
-                    var key = matGroup.replace(/^ja_est_/, '');
+                });
+                var spareGroups = containerEl ? containerEl.querySelectorAll('.ko-mat-btns[data-mat-group^="ja_nv_"]:not([data-mat-group^="ja_nv_handle_"])') : [];
+                spareGroups.forEach(function (group) {
+                    var key = group.getAttribute('data-mat-group').replace(/^ja_nv_/, '');
+                    if (_readAction(group.getAttribute('data-mat-group')) === 'exclude') {
+                        if (key === 'cap') { _setCap(exc); } else { exc[key] = true; }
+                    }
+                });
+                return { exclude: exc, del: del };
+            }
+
+            function collectEstMatOptions() {
+                var del = {};
+                var groups = containerEl ? containerEl.querySelectorAll('.ko-mat-btns[data-mat-group^="ja_est_"]') : [];
+                groups.forEach(function (group) {
+                    var key = group.getAttribute('data-mat-group').replace(/^ja_est_/, '');
+                    var action = _readAction(group.getAttribute('data-mat-group'));
                     if (action === 'exclude' || action === 'delete') {
-                        if (key === 'cap') {
-                            deleteOptions.rail_cap = true;
-                            deleteOptions.beam_cap = true;
-                        } else {
-                            deleteOptions[key] = true;
-                        }
+                        if (key === 'cap') { _setCap(del); } else { del[key] = true; }
                     }
-                } else {
-                    var key = matGroup.replace(/^ja_(nv|normal)_/, '');
-                    if (action === 'exclude') {
-                        if (key === 'cap') {
-                            excludeOptions.rail_cap = true;
-                            excludeOptions.beam_cap = true;
-                        } else {
-                            excludeOptions[key] = true;
-                        }
+                });
+                return { exclude: {}, del: del };
+            }
+
+            function collectNormalMatOptions() {
+                var exc = {};
+                var groups = containerEl ? containerEl.querySelectorAll('.ko-mat-btns[data-mat-group^="ja_normal_"]') : [];
+                groups.forEach(function (group) {
+                    var key = group.getAttribute('data-mat-group').replace(/^ja_normal_/, '');
+                    if (_readAction(group.getAttribute('data-mat-group')) === 'exclude') {
+                        if (key === 'cap') { _setCap(exc); } else { exc[key] = true; }
                     }
-                }
-            });
+                });
+                return { exclude: exc, del: {} };
+            }
+
+            var _nvMatResult = { exclude: {}, del: {} };
+            switch (getSelectedCaseType()) {
+                case 'NV': _nvMatResult = collectNvMatOptions(); break;
+                case 'EST': _nvMatResult = collectEstMatOptions(); break;
+                case 'NORMAL': _nvMatResult = collectNormalMatOptions(); break;
+            }
+            var excludeOptions = _nvMatResult.exclude;
+            var deleteOptions = _nvMatResult.del;
 
             if (Object.keys(excludeOptions).length > 0) {
                 requestBody.exclude_options = excludeOptions;
             }
             if (Object.keys(deleteOptions).length > 0) {
                 requestBody.exclude_delete_options = deleteOptions;
+            }
+            console.log('[DEBUG_CAP_SUBMIT] case=' + getSelectedCaseType() + ' exclude_options=', JSON.stringify(excludeOptions), 'exclude_delete_options=', JSON.stringify(deleteOptions));
+            var _capHandle = document.querySelector('.ko-mat-btns[data-mat-group="ja_nv_handle_cap"]');
+            if (_capHandle) {
+                var _ab = _capHandle.querySelector('button.active-blue, button.active-red, button.active-green, button.active-orange');
+                console.log('[DEBUG_CAP_SUBMIT] ja_nv_handle_cap activeBtn action=', _ab ? _ab.getAttribute('data-action') : 'NONE', 'classes=', _ab ? _ab.className : '-');
             }
 
             var caseType = getSelectedCaseType();
@@ -2980,6 +3248,11 @@
                 var koCaseTypeEl = document.querySelector('input[name="ko-case-type"]:checked');
                 requestBody.ko_case_type = koCaseTypeEl ? koCaseTypeEl.value : 'NORMAL';
 
+                var koNeedTotalMaterialsEl = document.getElementById('ko-need-total-materials');
+                if (koNeedTotalMaterialsEl && koNeedTotalMaterialsEl.checked) {
+                    requestBody.need_total_materials = true;
+                }
+
                 var koSaleTypeEl = document.querySelector('input[name="ko-sale-type"]:checked');
                 requestBody.sale_type = koSaleTypeEl ? koSaleTypeEl.value : 'export';
 
@@ -3037,11 +3310,17 @@
                     tariff_rate: parseFloat((document.getElementById('normal-tariff-rate') || {}).value) || 3,
                     fence_discount_rate: parseFloat((document.getElementById('normal-fence-discount-rate') || {}).value) || 94,
                     shipping_fee: parseFloat((document.getElementById('normal-shipping-fee') || {}).value) || 0,
+                    trade_condition: (document.getElementById('normal-trade-condition') || {}).value || '取引基本契約書に基づく',
                     mitsumori_condition: normalMitsumoriEl ? normalMitsumoriEl.value : 'CIF',
                     pile_spare_count: parseFloat((document.getElementById('nv-pile-spare-count') || {}).value) || 0,
                     pile_spare_price: parseFloat((document.getElementById('nv-pile-spare-price') || {}).value) || 0,
                     post_spare_count: parseFloat((document.getElementById('nv-post-spare-count') || {}).value) || 0,
-                    post_spare_price: parseFloat((document.getElementById('nv-post-spare-price') || {}).value) || 0
+                    post_spare_price: parseFloat((document.getElementById('nv-post-spare-price') || {}).value) || 0,
+                    sales_name: _selectedJaContact.name_ja || '',
+                    sales_phone: _selectedJaContact.mob || '',
+                    sales_tel: _selectedJaContact.tel || '',
+                    sales_fax: _selectedJaContact.fax || '-',
+                    remove_weight: !!(document.getElementById('normal-remove-weight') || {}).checked
                 };
                 if (confirmedNvFenceGateData) {
                     requestBody.nv_fence_gate_data = confirmedNvFenceGateData;
@@ -3163,6 +3442,26 @@
                 }
             }
 
+            if (currentGroup === '亚太组') {
+                var apTradeMethodEl = document.querySelector('input[name="ap-trade-method"]:checked');
+                requestBody.trade_method = apTradeMethodEl ? apTradeMethodEl.value : 'EXW';
+
+                var apDiscountRateEl = document.getElementById('ap-discount-rate');
+                requestBody.ap_discount_rate = apDiscountRateEl ? parseFloat(apDiscountRateEl.value) || 100 : 100;
+
+                var apSteelDiscountRateEl = document.getElementById('ap-steel-discount-rate');
+                requestBody.ap_steel_discount_rate = apSteelDiscountRateEl ? parseFloat(apSteelDiscountRateEl.value) || 100 : 100;
+
+                var apPurchasedDiscountRateEl = document.getElementById('ap-purchased-discount-rate');
+                requestBody.ap_purchased_discount_rate = apPurchasedDiscountRateEl ? parseFloat(apPurchasedDiscountRateEl.value) || 100 : 100;
+            }
+
+
+            // 碳钢包装（简易包装/铁托）：按当前语言组的选择决定碳钢单价取哪套吨价
+            var _steelPackIdMap = { '韩语组': 'ko-steel-pack', '日语组': 'nv-steel-pack', '英语组': 'en-steel-pack', '亚太组': 'ap-steel-pack' };
+            var _steelPackId = _steelPackIdMap[currentGroup];
+            var _steelPackEl = _steelPackId ? document.getElementById(_steelPackId) : null;
+            requestBody.steel_pack = _steelPackEl ? _steelPackEl.value : 'jybz';
 
             var response = await fetch(KS_API_BASE_URL + '/generate', {
                 method: 'POST',
@@ -3302,6 +3601,19 @@
                 elements.downloadMissingImageBtn.onclick = null;
             }
         }
+        updateInquiryRemarkVisibility();
+    }
+
+    function updateInquiryRemarkVisibility() {
+        var hasUnmatched = !!(state.unmatchedProducts && state.unmatchedProducts.length);
+        var hasMissingImage = !!(state.missingImageCodes && state.missingImageCodes.length);
+        var show = hasUnmatched || hasMissingImage;
+        if (elements.inquiryRemarkWrap) {
+            elements.inquiryRemarkWrap.style.display = show ? 'block' : 'none';
+        }
+        if (elements.priceInquiryRemarkWrap) {
+            elements.priceInquiryRemarkWrap.style.display = show ? 'block' : 'none';
+        }
     }
 
     function saveImageInquiryItems(codes) {
@@ -3354,6 +3666,8 @@
         state.projectName = '';
         state.bomOriginalFilename = '';
         state.missingImageItems = [];
+        state.missingImageCodes = [];
+        updateInquiryRemarkVisibility();
 
         renderInquiryList([]);
         renderTempPricingPanel([]);
@@ -3452,12 +3766,25 @@
             elements.inquiryDownloadReportButton,
             elements.priceInquiryDownloadReportButton
         ];
+        var submitButtons = [
+            elements.inquirySubmitButton,
+            elements.priceInquirySubmitButton
+        ];
 
-        if (!fileId || !filename) {
+        var hasUnmatched = !!(state.unmatchedProducts && state.unmatchedProducts.length);
+
+        // 没有询价项、或没有生成的询价文件时，两个按钮都隐藏
+        if (!hasUnmatched || !fileId || !filename) {
             state.inquiryFileId = null;
             state.inquiryFilename = null;
 
             buttons.forEach(function (button) {
+                if (button) {
+                    button.style.display = 'none';
+                    button.onclick = null;
+                }
+            });
+            submitButtons.forEach(function (button) {
                 if (button) {
                     button.style.display = 'none';
                     button.onclick = null;
@@ -3478,19 +3805,28 @@
                 };
             }
         });
+
+        submitButtons.forEach(function (button) {
+            if (button) {
+                button.style.display = '';
+                button.onclick = function () {
+                    sendInquiryEmail(fileId, filename);
+                };
+            }
+        });
     }
 
     function sendInquiryEmail(fileId, filename) {
-        if (!fileId) {
-            showStatus('询价表文件不存在，请重新生成报表', 'error');
+        if (!state.unmatchedProducts || state.unmatchedProducts.length === 0) {
+            showStatus('没有待询价的物料', 'error');
             return;
         }
 
-        var btn = elements.inquiryDownloadReportButton || elements.priceInquiryDownloadReportButton;
+        var btn = elements.inquirySubmitButton || elements.priceInquirySubmitButton;
         var originalText = btn ? btn.textContent : '';
         if (btn) {
             btn.disabled = true;
-            btn.textContent = '发送中...';
+            btn.textContent = '提交中...';
         }
 
         var remarkInput = elements.inquiryRemarkInput || elements.priceInquiryRemarkInput;
@@ -3502,6 +3838,8 @@
                 name: p.name || '',
                 spec: p.spec || '',
                 quantity: p.quantity || 0,
+                unit: p.unit || '',
+                weight: p.weight || 0,
             };
         });
 
@@ -3529,7 +3867,7 @@
         .then(function (response) { return readApiJson(response); })
         .then(function (data) {
             if (data.success) {
-                showStatus('询价表已发送: ' + (data.message || ''), 'success');
+                showStatus('询价项已提交到询价价格查询页面: ' + (data.message || ''), 'success');
                 renderInquiryConfirmList(materials, data.record_id);
             } else {
                 showStatus('发送失败: ' + (data.message || '未知错误'), 'error');
@@ -3541,7 +3879,7 @@
         .finally(function () {
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = originalText || '发送询价表';
+                btn.textContent = originalText || '提交询价项到询价价格查询';
             }
         });
     }
@@ -3558,7 +3896,7 @@
 
         var html = '<div style="background:#f0fdf4; border:2px solid #22c55e; border-radius:8px; padding:12px;">'
             + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'
-            + '<strong style="font-size:14px;color:#166534;">✅ 询价表已发送，以下为发送内容确认（' + materials.length + ' 项）</strong>'
+            + '<strong style="font-size:14px;color:#166534;">✅ 询价项已提交到「询价价格查询」页面，请前往填写价格（' + materials.length + ' 项）</strong>'
             + (recordId ? '<span style="font-size:11px;color:#6b7280;">记录ID: ' + recordId + '</span>' : '')
             + '</div>'
             + '<div style="max-height:400px;overflow-y:auto;border-radius:6px;">'
@@ -3568,17 +3906,22 @@
             + '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:left;min-width:90px;">产品编码</th>'
             + '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:left;">产品名称</th>'
             + '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:left;min-width:100px;">规格</th>'
+            + '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:left;min-width:60px;">预装情况</th>'
             + '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:right;">数量</th>'
             + '</tr></thead><tbody>';
 
         for (var i = 0; i < materials.length; i++) {
             var p = materials[i];
             var bg = i % 2 === 0 ? '#ffffff' : '#f0fdf4';
+            var _pre = p.preinstall || '预装';
+            var _preBg = _pre === '非预装' ? '#fef2f2' : '#f0fdf4';
+            var _preColor = _pre === '非预装' ? '#dc2626' : '#15803d';
             html += '<tr style="background:' + bg + ';">'
                 + '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:center;color:#166534;">' + (i + 1) + '</td>'
                 + '<td style="padding:5px 8px;border:1px solid #e5e7eb;font-weight:600;color:#1e40af;">' + escapeHtml(p.code || '') + '</td>'
                 + '<td style="padding:5px 8px;border:1px solid #e5e7eb;">' + escapeHtml(p.name || '') + '</td>'
                 + '<td style="padding:5px 8px;border:1px solid #e5e7eb;color:#6b7280;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(p.spec || '') + '">' + escapeHtml(p.spec || '') + '</td>'
+                + '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:center;"><span style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;background:' + _preBg + ';color:' + _preColor + ';">' + escapeHtml(_pre) + '</span></td>'
                 + '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:right;font-weight:600;">' + (p.quantity || '') + '</td>'
                 + '</tr>';
         }
@@ -3603,6 +3946,9 @@
 
         container.style.display = 'block';
 
+        var currentGroup = typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '';
+        var showPre = (currentGroup === '日语组' || currentGroup === '韩语组');
+
         var html = '<div style="background:#eff6ff; border:2px solid #3b82f6; border-radius:8px; padding:12px;">'
             + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'
             + '<strong style="font-size:14px;color:#1e40af;">临时数据统计情况（' + pricingMatched.length + ' 项）</strong>'
@@ -3612,10 +3958,16 @@
             + '<thead><tr style="background:#dbeafe;position:sticky;top:0;z-index:1;">'
             + '<th style="padding:6px 8px;border:1px solid #93c5fd;text-align:center;width:36px;">序号</th>'
             + '<th style="padding:6px 8px;border:1px solid #93c5fd;text-align:left;min-width:90px;">编码</th>'
-            + '<th style="padding:6px 8px;border:1px solid #93c5fd;text-align:left;min-width:80px;">规格长度</th>'
-            + '<th style="padding:6px 8px;border:1px solid #93c5fd;text-align:right;min-width:90px;">总重量(吨)</th>'
-            + '<th style="padding:6px 8px;border:1px solid #93c5fd;text-align:right;min-width:90px;">单价</th>'
-            + '<th style="padding:6px 8px;border:1px solid #93c5fd;text-align:left;min-width:160px;">使用价格说明</th>'
+            + '<th style="padding:6px 8px;border:1px solid #93c5fd;text-align:left;min-width:80px;">规格长度</th>';
+        if (showPre) {
+            html += '<th style="padding:6px 8px;border:1px solid #93c5fd;text-align:left;min-width:60px;">预装情况</th>';
+        }
+        html += '<th style="padding:6px 8px;border:1px solid #93c5fd;text-align:right;min-width:90px;">总重量(吨)</th>'
+            + '<th style="padding:6px 8px;border:1px solid #93c5fd;text-align:right;min-width:90px;">单价</th>';
+        if (showPre) {
+            html += '<th style="padding:6px 8px;border:1px solid #93c5fd;text-align:right;min-width:100px;">预装情况对应金额</th>';
+        }
+        html += '<th style="padding:6px 8px;border:1px solid #93c5fd;text-align:left;min-width:160px;">使用价格说明</th>'
             + '</tr></thead><tbody>';
 
         for (var i = 0; i < pricingMatched.length; i++) {
@@ -3623,13 +3975,22 @@
             var sideLabel = item.side === 'external' ? '外部' : '内部';
             var priceDesc = item.length_tier + '米|' + item.ton_tier + '吨——' + sideLabel;
             var bg = i % 2 === 0 ? '#ffffff' : '#eff6ff';
+            var _tpi = item.preinstall || '预装';
+            var _tpiBg = _tpi === '非预装' ? '#fef2f2' : '#f0fdf4';
+            var _tpiColor = _tpi === '非预装' ? '#dc2626' : '#15803d';
             html += '<tr style="background:' + bg + ';">'
                 + '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:center;color:#1e40af;">' + (i + 1) + '</td>'
                 + '<td style="padding:5px 8px;border:1px solid #e5e7eb;font-weight:600;color:#1e40af;">' + escapeHtml(item.code || '') + '</td>'
-                + '<td style="padding:5px 8px;border:1px solid #e5e7eb;color:#6b7280;">' + escapeHtml(item.spec || '') + '</td>'
-                + '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:right;">' + (item.total_weight_ton != null ? item.total_weight_ton : '-') + '</td>'
-                + '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:right;font-weight:600;color:#1e40af;">' + (item.price != null ? item.price : '-') + '</td>'
-                + '<td style="padding:5px 8px;border:1px solid #e5e7eb;">'
+                + '<td style="padding:5px 8px;border:1px solid #e5e7eb;color:#6b7280;">' + escapeHtml(item.spec || '') + '</td>';
+            if (showPre) {
+                html += '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:center;"><span style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;background:' + _tpiBg + ';color:' + _tpiColor + ';">' + escapeHtml(_tpi) + '</span></td>';
+            }
+            html += '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:right;">' + (item.total_weight_ton != null ? item.total_weight_ton : '-') + '</td>'
+                + '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:right;font-weight:600;color:#1e40af;">' + (item.price != null ? item.price : '-') + '</td>';
+            if (showPre) {
+                html += '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:right;font-weight:600;color:#1d4ed8;">' + (item.adjusted_price != null ? item.adjusted_price : '-') + '</td>';
+            }
+            html += '<td style="padding:5px 8px;border:1px solid #e5e7eb;">'
                 + '<span style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;background:#dbeafe;color:#1e40af;">' + escapeHtml(priceDesc) + '</span>'
                 + '</td>'
                 + '</tr>';
@@ -3656,6 +4017,9 @@
         container.style.display = 'block';
         var html = '';
 
+        var currentGroup = typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '';
+        var showPre = (currentGroup === '日语组' || currentGroup === '韩语组');
+
         if (autoMatched && autoMatched.length > 0) {
             html += '<div style="background:#f0fdf4; border:2px solid #22c55e; border-radius:8px; padding:12px; margin-bottom:12px;">'
                 + '<strong style="font-size:14px;color:#166534;">临时询价库自动匹配（' + autoMatched.length + ' 项，编码+规格+数量完全一致）</strong>'
@@ -3664,24 +4028,41 @@
                 + '<thead><tr style="background:#dcfce7;position:sticky;top:0;z-index:1;">'
                 + '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:center;width:36px;">#</th>'
                 + '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:left;">产品编码</th>'
-                + '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:left;">规格</th>'
-                + '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:right;">数量</th>'
-                + '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:right;">匹配价格</th>'
-                + '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:left;">单位</th>'
+                + '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:left;">规格</th>';
+            if (showPre) {
+                html += '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:left;">预装情况</th>';
+            }
+            html += '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:right;">数量</th>'
+                + '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:right;">匹配价格</th>';
+            if (showPre) {
+                html += '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:right;">预装情况对应金额</th>';
+            }
+            html += '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:left;">单位</th>'
                 + '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:left;">来源</th>'
+                + '<th style="padding:6px 8px;border:1px solid #bbf7d0;text-align:left;">来源日期</th>'
                 + '</tr></thead><tbody>';
 
             for (var i = 0; i < autoMatched.length; i++) {
                 var item = autoMatched[i];
                 var bg = i % 2 === 0 ? '#ffffff' : '#f0fdf4';
+                var _tpi = item.preinstall || '预装';
+                var _tpiBg = _tpi === '非预装' ? '#fef2f2' : '#f0fdf4';
+                var _tpiColor = _tpi === '非预装' ? '#dc2626' : '#15803d';
                 html += '<tr style="background:' + bg + ';">'
                     + '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:center;color:#166534;">' + (i + 1) + '</td>'
                     + '<td style="padding:5px 8px;border:1px solid #e5e7eb;font-weight:600;color:#1e40af;">' + escapeHtml(item.code || '') + '</td>'
-                    + '<td style="padding:5px 8px;border:1px solid #e5e7eb;color:#6b7280;">' + escapeHtml(item.spec || '') + '</td>'
-                    + '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:right;">' + (item.quantity || '') + '</td>'
-                    + '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:right;font-weight:600;color:#166534;">' + (item.price != null ? item.price : '-') + '</td>'
-                    + '<td style="padding:5px 8px;border:1px solid #e5e7eb;">' + escapeHtml(item.unit || '') + '</td>'
+                    + '<td style="padding:5px 8px;border:1px solid #e5e7eb;color:#6b7280;">' + escapeHtml(item.spec || '') + '</td>';
+                if (showPre) {
+                    html += '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:center;"><span style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;background:' + _tpiBg + ';color:' + _tpiColor + ';">' + escapeHtml(_tpi) + '</span></td>';
+                }
+                html += '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:right;">' + (item.quantity || '') + '</td>'
+                    + '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:right;font-weight:600;color:#166534;">' + (item.price != null ? item.price : '-') + '</td>';
+                if (showPre) {
+                    html += '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:right;font-weight:600;color:#1d4ed8;">' + (item.adjusted_price != null ? item.adjusted_price : '-') + '</td>';
+                }
+                html += '<td style="padding:5px 8px;border:1px solid #e5e7eb;">' + escapeHtml(item.unit || '') + '</td>'
                     + '<td style="padding:5px 8px;border:1px solid #e5e7eb;"><span style="background:#dcfce7;color:#166534;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;">临时库</span></td>'
+                    + '<td style="padding:5px 8px;border:1px solid #e5e7eb;color:#6b7280;">' + escapeHtml(item.source_date || '') + '</td>'
                     + '</tr>';
             }
             html += '</tbody></table></div></div>';
@@ -3763,6 +4144,9 @@
 
         container.style.display = 'block';
 
+        var currentGroup = typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '';
+        var showPre = (currentGroup === '日语组' || currentGroup === '韩语组');
+
         var html = '<div style="background:#fffbeb; border:1px solid #fbbf24; border-radius:8px; padding:12px;">'
             + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'
             + '<strong style="font-size:14px;color:#92400e;">待询价物料（' + products.length + ' 项）</strong>'
@@ -3773,8 +4157,11 @@
             + '<th style="padding:6px 8px;border:1px solid #e5e7eb;text-align:center;width:36px;">#</th>'
             + '<th style="padding:6px 8px;border:1px solid #e5e7eb;text-align:left;min-width:90px;">产品编码</th>'
             + '<th style="padding:6px 8px;border:1px solid #e5e7eb;text-align:left;">产品名称</th>'
-            + '<th style="padding:6px 8px;border:1px solid #e5e7eb;text-align:left;min-width:100px;">规格</th>'
-            + '<th style="padding:6px 8px;border:1px solid #e5e7eb;text-align:right;">数量</th>'
+            + '<th style="padding:6px 8px;border:1px solid #e5e7eb;text-align:left;min-width:100px;">规格</th>';
+        if (showPre) {
+            html += '<th style="padding:6px 8px;border:1px solid #e5e7eb;text-align:left;min-width:60px;">预装情况</th>';
+        }
+        html += '<th style="padding:6px 8px;border:1px solid #e5e7eb;text-align:right;">数量</th>'
             + '<th style="padding:6px 8px;border:1px solid #e5e7eb;text-align:left;min-width:120px;">缺失原因</th>'
             + '</tr></thead><tbody>';
 
@@ -3786,12 +4173,18 @@
             var tagBg = isPrice ? '#fef2f2' : '#fffbeb';
             var tagText = isPrice ? '缺价' : '缺图';
             var bg = i % 2 === 0 ? '#ffffff' : '#fffef5';
+            var _preinstall = p.preinstall || '预装';
+            var _preTagBg = _preinstall === '非预装' ? '#fef2f2' : '#f0fdf4';
+            var _preTagColor = _preinstall === '非预装' ? '#dc2626' : '#15803d';
             html += '<tr style="background:' + bg + ';">'
                 + '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:center;color:#92400e;">' + (i + 1) + '</td>'
                 + '<td style="padding:5px 8px;border:1px solid #e5e7eb;font-weight:600;color:#1e40af;">' + escapeHtml(p.code || '') + '</td>'
                 + '<td style="padding:5px 8px;border:1px solid #e5e7eb;">' + escapeHtml(p.name || '') + '</td>'
-                + '<td style="padding:5px 8px;border:1px solid #e5e7eb;color:#6b7280;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(p.spec || '') + '">' + escapeHtml(p.spec || '') + '</td>'
-                + '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:right;font-weight:600;">' + (p.quantity || '') + '</td>'
+                + '<td style="padding:5px 8px;border:1px solid #e5e7eb;color:#6b7280;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(p.spec || '') + '">' + escapeHtml(p.spec || '') + '</td>';
+            if (showPre) {
+                html += '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:center;"><span style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;background:' + _preTagBg + ';color:' + _preTagColor + ';">' + escapeHtml(_preinstall) + '</span></td>';
+            }
+            html += '<td style="padding:5px 8px;border:1px solid #e5e7eb;text-align:right;font-weight:600;">' + (p.quantity || '') + '</td>'
                 + '<td style="padding:5px 8px;border:1px solid #e5e7eb;">'
                 + '<span style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;background:' + tagBg + ';color:' + tagColor + ';">' + tagText + '</span> '
                 + '<span style="color:#6b7280;">' + escapeHtml(reason) + '</span>'
@@ -4139,7 +4532,7 @@
             if (estPanel) estPanel.style.display = (selected === 'EST') ? 'block' : 'none';
             if (normalPanel) normalPanel.style.display = (selected === 'NORMAL') ? 'block' : 'none';
             var weightCodeRow = document.getElementById('weight-code-row');
-            if (weightCodeRow) weightCodeRow.style.display = (selected === 'EST' || selected === 'NV' || selected === 'NORMAL') ? '' : 'none';
+            if (weightCodeRow) weightCodeRow.style.display = (selected === 'EST' || selected === 'NV') ? '' : 'none';
             var singleWcLabel = document.getElementById('single-weight-code-label');
             var nvWeightLabel = document.getElementById('nv-need-weight-label');
             var nvCodeLabel = document.getElementById('nv-need-code-label');
@@ -4155,7 +4548,7 @@
             var nvMatOptions = document.getElementById('nv-mat-options');
             if (nvMatOptions) nvMatOptions.style.display = (selected === 'NV') ? '' : 'none';
             var jpyWrapper = document.getElementById('nv-jpy-quote-wrapper');
-            if (jpyWrapper) jpyWrapper.style.display = (selected === 'NV' || selected === 'NORMAL') ? 'flex' : 'none';
+            if (jpyWrapper) jpyWrapper.style.display = (selected === 'NV') ? 'flex' : 'none';
             if (selected === 'NV') {
                 switchFenceMode('standard');
                 loadDz1001DefaultPrice();
@@ -4276,6 +4669,446 @@
             pile_include_dz: true,
             need_jpy_quote: (document.getElementById('nv-need-jpy-quote') || {}).checked || false,
         };
+    }
+
+    // ========== 用户报价习惯 (preferences) ==========
+    var PREF_FIELD_MAP = {
+        '韩语组': [
+            { key: 'trade_method', type: 'radio', name: 'ko-trade-method' },
+            { key: 'sale_type', type: 'radio', name: 'ko-sale-type' },
+            { key: 'dest_port', type: 'destport', ids: ['ko-dest-port'], customs: ['ko-dest-port-custom'] },
+            { key: 'ko_company_discount', type: 'num', id: 'ko-company-discount', trigger: 'input' },
+            { key: 'ko_commission', type: 'num', id: 'ko-commission', trigger: 'input' },
+            { key: 'ko_steel_discount_rate', type: 'num', id: 'ko-steel-discount-rate' },
+            { key: 'ko_purchased_discount_rate', type: 'num', id: 'ko-purchased-discount-rate' },
+            { key: 'ko_tariff_rate', type: 'num', id: 'ko-tariff-rate' },
+            { key: 'ko_consumption_tax', type: 'num', id: 'ko-consumption-tax' },
+            { key: 'coating_thickness', type: 'coating', prefix: 'ko' },
+        ],
+        '日语组': {
+            'EST': [
+                { key: 'ja_exchange_rate', type: 'num', id: 'ja-exchange-rate' },
+                { key: 'ja_tariff_rate', type: 'num', id: 'ja-tariff-rate' },
+                { key: 'ja_consumption_tax', type: 'num', id: 'ja-consumption-tax' },
+                { key: 'ja_fence_tax', type: 'num', id: 'ja-fence-tax' },
+                { key: 'ja_discount_rate', type: 'num', id: 'ja-discount-rate' },
+                { key: 'ja_truck_size', type: 'text', id: 'ja-truck-size' },
+                { key: 'ja_truck_unic', type: 'check', id: 'ja-truck-unic' },
+                { key: 'ja_truck_flat', type: 'check', id: 'ja-truck-flat' },
+                { key: 'coating_thickness', type: 'coating', prefix: '' },
+            ],
+            'NORMAL': [
+                { key: 'normal_discount_rate', type: 'num', id: 'normal-discount-rate' },
+                { key: 'normal_consumption_tax', type: 'num', id: 'normal-consumption-tax' },
+                { key: 'normal_tariff_rate', type: 'num', id: 'normal-tariff-rate' },
+                { key: 'normal_fence_discount_rate', type: 'num', id: 'normal-fence-discount-rate' },
+                { key: 'normal_shipping_fee', type: 'num', id: 'normal-shipping-fee' },
+                { key: 'normal_trade_condition', type: 'text', id: 'normal-trade-condition' },
+                { key: 'normal_mitsumori_condition', type: 'radio', name: 'normal-mitsumori-condition' },
+                { key: 'normal_remove_weight', type: 'check', id: 'normal-remove-weight' },
+                { key: 'coating_thickness', type: 'coating', prefix: '' },
+            ],
+            'NV': [
+                { key: 'nv_company_discount', type: 'num', id: 'nv-company-discount', trigger: 'input' },
+                { key: 'nv_commission', type: 'num', id: 'nv-commission', trigger: 'input' },
+                { key: 'nv_fence_discount_rate', type: 'num', id: 'nv-fence-discount-rate' },
+                { key: 'nv_steel_discount_rate', type: 'num', id: 'nv-steel-discount-rate' },
+                { key: 'nv_purchased_discount_rate', type: 'num', id: 'nv-purchased-discount-rate' },
+                { key: 'nv_exchange_rate', type: 'num', id: 'nv-exchange-rate' },
+                { key: 'nv_consumption_tax', type: 'num', id: 'nv-consumption-tax' },
+                { key: 'nv_tariff_rate', type: 'num', id: 'nv-tariff-rate' },
+                { key: 'nv_dest_port', type: 'destport', ids: ['nv-dest-port'], customs: ['nv-dest-port-custom'] },
+                { key: 'nv_truck_size', type: 'text', id: 'nv-truck-size' },
+                { key: 'nv_truck_unic', type: 'check', id: 'nv-truck-unic' },
+                { key: 'nv_truck_flat', type: 'check', id: 'nv-truck-flat' },
+                { key: 'nv_torihiki_condition', type: 'text', id: 'nv-torihiki-condition' },
+                { key: 'nv_mitsumori_condition', type: 'radio', name: 'nv-trade-method', trigger: 'change' },
+                { key: 'nv_need_jpy_quote', type: 'check', id: 'nv-need-jpy-quote' },
+                { key: 'nv_adjustment', type: 'num', id: 'nv-adjustment' },
+                { key: 'coating_thickness', type: 'coating', prefix: '' },
+            ],
+        },
+        '英语组': [
+            { key: 'en_company_discount', type: 'num', id: 'en-company-discount', trigger: 'input' },
+            { key: 'en_commission', type: 'num', id: 'en-commission', trigger: 'input' },
+            { key: 'en_steel_discount_rate', type: 'num', id: 'en-steel-discount-rate' },
+            { key: 'en_purchased_discount_rate', type: 'num', id: 'en-purchased-discount-rate' },
+            { key: 'en_trade_method', type: 'radio', name: 'en-trade-method', trigger: 'change' },
+            { key: 'en_dest_port', type: 'destport', ids: ['en-dest-port', 'en-cif-dest-port'], customs: ['en-dest-port-custom', 'en-cif-dest-port-custom'] },
+            { key: 'en_sale_type', type: 'radio', name: 'en-sale-type' },
+            { key: 'en_lang', type: 'radio', name: 'en-lang' },
+            { key: 'en_case_type', type: 'radio', name: 'en-case-type' },
+            { key: 'en_quote_validity', type: 'validity', id: 'en-quote-validity', custom: 'en-quote-validity-custom' },
+            { key: 'en_discount_method', type: 'radio', name: 'en-discount-method' },
+            { key: 'en_payment_term', type: 'radio', name: 'en-payment-term' },
+            { key: 'en_seller_name', type: 'radio', name: 'en-seller' },
+            { key: 'coating_thickness', type: 'coating', prefix: 'en' },
+        ],
+        '亚太组': [
+            { key: 'ap_trade_method', type: 'radio', name: 'ap-trade-method', trigger: 'change' },
+            { key: 'ap_company_discount', type: 'num', id: 'ap-company-discount', trigger: 'input' },
+            { key: 'ap_commission', type: 'num', id: 'ap-commission', trigger: 'input' },
+            { key: 'ap_steel_discount_rate', type: 'num', id: 'ap-steel-discount-rate' },
+            { key: 'ap_purchased_discount_rate', type: 'num', id: 'ap-purchased-discount-rate' },
+            { key: 'coating_thickness', type: 'coating', prefix: 'ap' },
+        ],
+    };
+
+    function getCurrentPrefCaseType(group) {
+        if (group === '日语组') return getSelectedCaseType();
+        return null;
+    }
+
+    function getCurrentPrefFields() {
+        var group = typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '韩语组';
+        var entry = PREF_FIELD_MAP[group];
+        if (!entry) return { group: group, caseType: null, fields: [] };
+        if (group === '日语组') {
+            var ct = getCurrentPrefCaseType(group);
+            return { group: group, caseType: ct, fields: entry[ct] || [] };
+        }
+        return { group: group, caseType: null, fields: Array.isArray(entry) ? entry : [] };
+    }
+
+    function _dispatch(el, eventName) {
+        try { el.dispatchEvent(new Event(eventName, { bubbles: true })); } catch (e) {}
+    }
+
+    function _applyOne(field, value) {
+        if (value === undefined || value === null || value === '') return;
+        switch (field.type) {
+            case 'num':
+            case 'text': {
+                var el = document.getElementById(field.id);
+                if (el) { el.value = value; if (field.trigger) _dispatch(el, field.trigger); }
+                break;
+            }
+            case 'radio': {
+                var r = document.querySelector('input[name="' + field.name + '"][value="' + value + '"]');
+                if (r && !r.checked) { r.checked = true; if (field.trigger) _dispatch(r, field.trigger); }
+                break;
+            }
+            case 'check': {
+                var c = document.getElementById(field.id);
+                if (c) { c.checked = !!value; _dispatch(c, 'change'); }
+                break;
+            }
+            case 'coating': {
+                var btnId = 'btn-' + (field.prefix ? field.prefix + '-' : '') + 'coating-' + value;
+                var btn = document.getElementById(btnId);
+                if (btn) btn.click();
+                break;
+            }
+            case 'destport': {
+                var matched = false;
+                (field.ids || []).forEach(function (sid) {
+                    var sel = document.getElementById(sid);
+                    if (!sel || matched) return;
+                    var has = false;
+                    for (var k = 0; k < sel.options.length; k++) { if (sel.options[k].value === value) { has = true; break; } }
+                    if (has) { sel.value = value; _dispatch(sel, 'change'); matched = true; }
+                });
+                if (!matched) {
+                    var firstSel = document.getElementById((field.ids || [])[0]);
+                    if (firstSel) { firstSel.value = '__custom__'; _dispatch(firstSel, 'change'); }
+                    var cust = document.getElementById((field.customs || [])[0]);
+                    if (cust) cust.value = value;
+                }
+                break;
+            }
+            case 'validity': {
+                var vsel = document.getElementById(field.id);
+                if (!vsel) break;
+                var vhas = false;
+                for (var m = 0; m < vsel.options.length; m++) { if (vsel.options[m].value === value) { vhas = true; break; } }
+                if (vhas) { vsel.value = value; _dispatch(vsel, 'change'); }
+                else { vsel.value = 'custom'; _dispatch(vsel, 'change'); var vc = document.getElementById(field.custom); if (vc) vc.value = String(value).replace(/d$/i, ''); }
+                break;
+            }
+        }
+    }
+
+    function _collectOne(field) {
+        switch (field.type) {
+            case 'num':
+            case 'text': {
+                var el = document.getElementById(field.id);
+                if (!el) return undefined;
+                if (field.type === 'num') { var f = parseFloat(el.value); return isNaN(f) ? undefined : f; }
+                return el.value && el.value !== '' ? el.value : undefined;
+            }
+            case 'radio': {
+                var r = document.querySelector('input[name="' + field.name + '"]:checked');
+                return r ? r.value : undefined;
+            }
+            case 'check': {
+                var c = document.getElementById(field.id);
+                return c ? !!c.checked : undefined;
+            }
+            case 'coating': {
+                return state && state.coatingThickness ? state.coatingThickness : undefined;
+            }
+            case 'destport': {
+                var ids = field.ids || [], customs = field.customs || [];
+                for (var i = 0; i < ids.length; i++) {
+                    var sel = document.getElementById(ids[i]);
+                    if (!sel || !sel.offsetParent) continue;
+                    if (sel.value === '__custom__') {
+                        var cu = document.getElementById(customs[i]);
+                        return (cu && cu.value && cu.value.trim()) ? cu.value.trim() : undefined;
+                    }
+                    if (sel.value) return sel.value;
+                }
+                return undefined;
+            }
+            case 'validity': {
+                var vsel = document.getElementById(field.id);
+                if (!vsel) return undefined;
+                if (vsel.value === 'custom') {
+                    var vc = document.getElementById(field.custom);
+                    return (vc && vc.value) ? vc.value + 'd' : undefined;
+                }
+                return vsel.value || undefined;
+            }
+        }
+        return undefined;
+    }
+
+    function applyUserPreferences() {
+        var info = getCurrentPrefFields();
+        var prefs = window._ksAuth && window._ksAuth.preferences ? window._ksAuth.preferences : null;
+        if (!prefs) return;
+        var sub;
+        if (info.group === '日语组') {
+            sub = (prefs['日语组'] || {})[info.caseType] || {};
+        } else {
+            sub = prefs[info.group] || {};
+        }
+        if (!sub || typeof sub !== 'object') return;
+        info.fields.forEach(function (f) {
+            if (sub[f.key] !== undefined && sub[f.key] !== null) {
+                _applyOne(f, sub[f.key]);
+            }
+        });
+    }
+
+    function collectUserPreferences() {
+        var info = getCurrentPrefFields();
+        var section = {};
+        info.fields.forEach(function (f) {
+            var v = _collectOne(f);
+            if (v !== undefined && v !== null && v !== '') section[f.key] = v;
+        });
+        var payload = {};
+        if (info.group === '日语组') {
+            payload['日语组'] = {};
+            payload['日语组'][info.caseType] = section;
+        } else {
+            payload[info.group] = section;
+        }
+        return payload;
+    }
+
+    function _showPrefStatus(msg, isError) {
+        var st = document.getElementById('save-prefs-status');
+        if (!st) return;
+        st.textContent = msg;
+        st.style.color = isError ? '#991b1b' : 'var(--muted)';
+        clearTimeout(st._timer);
+        st._timer = setTimeout(function () { st.textContent = ''; }, 4000);
+    }
+
+    function saveMyPreferences() {
+        var payload = collectUserPreferences();
+        var printPayload = collectPrintPreferences();
+        if (printPayload) { for (var pk in printPayload) { payload[pk] = printPayload[pk]; } }
+
+        var firstKey = Object.keys(payload)[0];
+        var inner = firstKey ? payload[firstKey] : null;
+        if (info_groupIsJapanese()) {
+            inner = inner && inner[Object.keys(inner)[0]] ? inner[Object.keys(inner)[0]] : null;
+        }
+        var hasPrint = payload.print && Object.keys(payload.print).length > 0;
+        if ((!inner || Object.keys(inner).length === 0) && !hasPrint) { _showPrefStatus('未检测到可保存的字段', true); return; }
+
+        var btn = document.getElementById('save-prefs-btn');
+        if (btn) btn.disabled = true;
+        _showPrefStatus('正在保存...', false);
+        var baseUrl = typeof KS_API_BASE_URL !== 'undefined' ? KS_API_BASE_URL : '';
+        fetch(baseUrl + '/auth/me/preferences', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ preferences: payload }),
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (btn) btn.disabled = false;
+                if (data && data.success) {
+                    if (data.data && data.data.preferences && window._ksAuth) {
+                        window._ksAuth.preferences = data.data.preferences;
+                        if (typeof setAuth === 'function') setAuth(window._ksAuth);
+                    }
+                    _showPrefStatus('习惯已保存', false);
+                } else {
+                    _showPrefStatus(data && data.message ? data.message : '保存失败', true);
+                }
+            })
+            .catch(function () {
+                if (btn) btn.disabled = false;
+                _showPrefStatus('保存失败，请检查网络', true);
+            });
+    }
+
+    function info_groupIsJapanese() {
+        var g = typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '韩语组';
+        return g === '日语组';
+    }
+
+    // ========== 打印设置（个人习惯） ==========
+    // 各案件默认打印参数取自公共全局（见 utils.js），与后端 print_settings.py 一致。
+    var PRINT_CASE_DEFAULTS = window.KS_PRINT_DEFAULTS;
+    var PRINT_CASE_LABELS = window.KS_PRINT_LABELS;
+
+    function _printGroup() {
+        return typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '韩语组';
+    }
+    function _radioVal(name, fallback) {
+        var el = document.querySelector('input[name="' + name + '"]:checked');
+        return el ? el.value : fallback;
+    }
+    function _printCaseKey() {
+        var g = _printGroup();
+        if (g === '韩语组') return 'ko_' + (_radioVal('ko-case-type', 'NORMAL').toLowerCase());
+        if (g === '日语组') {
+            var v = (typeof getSelectedCaseType === 'function') ? getSelectedCaseType() : _radioVal('ja-case-type', 'NV');
+            return 'ja_' + String(v).toLowerCase();
+        }
+        if (g === '英语组') {
+            var ev = _radioVal('en-case-type', 'COMMON');
+            return ev === 'SIMPLE' ? 'en_simple' : 'en_common';
+        }
+        if (g === '亚太组') return 'ap_common';
+        return 'ko_normal';
+    }
+    function _getStoredPrint(caseKey) {
+        var prefs = window._ksAuth && window._ksAuth.preferences ? window._ksAuth.preferences : null;
+        var p = prefs && prefs.print ? prefs.print[caseKey] : null;
+        return (p && typeof p === 'object') ? p : null;
+    }
+    function _readPrintInputs() {
+        return {
+            orientation: (document.getElementById('print-orientation') || {}).value || 'portrait',
+            fit_mode: (document.getElementById('print-fit-mode') || {}).value || 'fit_width',
+            horizontal_centered: !!(document.getElementById('print-centered') || {}).checked,
+            margin_top: parseFloat((document.getElementById('print-mt') || {}).value),
+            margin_bottom: parseFloat((document.getElementById('print-mb') || {}).value),
+            margin_left: parseFloat((document.getElementById('print-ml') || {}).value),
+            margin_right: parseFloat((document.getElementById('print-mr') || {}).value),
+        };
+    }
+    function _fillPrintInputs(s) {
+        var set = function (id, v) { var el = document.getElementById(id); if (el) el.value = v; };
+        var chk = function (id, v) { var el = document.getElementById(id); if (el) el.checked = !!v; };
+        set('print-orientation', s.orientation);
+        set('print-fit-mode', s.fit_mode);
+        chk('print-centered', s.horizontal_centered);
+        set('print-mt', s.margin_top);
+        set('print-mb', s.margin_bottom);
+        set('print-ml', s.margin_left);
+        set('print-mr', s.margin_right);
+    }
+    function refreshPrintPanel() {
+        var card = document.getElementById('print-settings-card');
+        if (!card) return;
+        var caseKey = _printCaseKey();
+        var label = document.getElementById('print-case-label');
+        if (label) label.textContent = '当前案件：' + (PRINT_CASE_LABELS[caseKey] || caseKey);
+        var def = PRINT_CASE_DEFAULTS[caseKey] || PRINT_CASE_DEFAULTS.ko_normal;
+        var stored = _getStoredPrint(caseKey);
+        _fillPrintInputs(stored || def);
+    }
+    function _printEq(a, b) {
+        return a.orientation === b.orientation && a.fit_mode === b.fit_mode &&
+            !!a.horizontal_centered === !!b.horizontal_centered &&
+            Math.abs((a.margin_top || 0) - b.margin_top) < 1e-6 &&
+            Math.abs((a.margin_bottom || 0) - b.margin_bottom) < 1e-6 &&
+            Math.abs((a.margin_left || 0) - b.margin_left) < 1e-6 &&
+            Math.abs((a.margin_right || 0) - b.margin_right) < 1e-6;
+    }
+    function collectPrintPreferences() {
+        var card = document.getElementById('print-settings-card');
+        if (!card) return null;
+        var caseKey = _printCaseKey();
+        var cur = _readPrintInputs();
+        var def = PRINT_CASE_DEFAULTS[caseKey] || PRINT_CASE_DEFAULTS.ko_normal;
+        if (_printEq(cur, def)) {
+            // 与默认一致 → 发送 null 清除该案件的自定义（真正「默认」）
+            return { print: {} };
+        }
+        var sec = {
+            orientation: cur.orientation,
+            fit_mode: cur.fit_mode,
+            horizontal_centered: !!cur.horizontal_centered,
+            margin_top: cur.margin_top,
+            margin_bottom: cur.margin_bottom,
+            margin_left: cur.margin_left,
+            margin_right: cur.margin_right,
+        };
+        var payload = { print: {} };
+        payload.print[caseKey] = sec;
+        return payload;
+    }
+    function applyPrintPreferences() { refreshPrintPanel(); }
+    function _showPrintStatus(msg, isError) {
+        var st = document.getElementById('print-status');
+        if (!st) return;
+        st.textContent = msg;
+        st.style.color = isError ? '#991b1b' : 'var(--muted)';
+        clearTimeout(st._timer);
+        st._timer = setTimeout(function () { st.textContent = ''; }, 4000);
+    }
+    function restorePrintDefault() {
+        var caseKey = _printCaseKey();
+        var def = PRINT_CASE_DEFAULTS[caseKey] || PRINT_CASE_DEFAULTS.ko_normal;
+        _fillPrintInputs(def);
+        // 发送 null 删除该案件的自定义打印设置
+        var payload = { print: {} };
+        payload.print[caseKey] = null;
+        var btn = document.getElementById('print-restore-btn');
+        if (btn) btn.disabled = true;
+        _showPrintStatus('正在恢复默认...', false);
+        var baseUrl = typeof KS_API_BASE_URL !== 'undefined' ? KS_API_BASE_URL : '';
+        fetch(baseUrl + '/auth/me/preferences', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ preferences: payload }),
+        }).then(function (r) { return r.json(); }).then(function (data) {
+            if (btn) btn.disabled = false;
+            if (data && data.success) {
+                if (data.data && data.data.preferences && window._ksAuth) {
+                    window._ksAuth.preferences = data.data.preferences;
+                    if (typeof setAuth === 'function') setAuth(window._ksAuth);
+                }
+                _showPrintStatus('已恢复默认', false);
+            } else {
+                _showPrintStatus(data && data.message ? data.message : '恢复失败', true);
+            }
+        }).catch(function () {
+            if (btn) btn.disabled = false;
+            _showPrintStatus('恢复失败，请检查网络', true);
+        });
+    }
+    function _bindPrintControls() {
+        var restore = document.getElementById('print-restore-btn');
+        if (restore && !restore._bound) { restore._bound = true; restore.addEventListener('click', restorePrintDefault); }
+        // 切换案件类型时刷新面板
+        ['ko-case-type', 'ja-case-type', 'en-case-type'].forEach(function (name) {
+            document.querySelectorAll('input[name="' + name + '"]').forEach(function (r) {
+                if (!r._printBound) { r._printBound = true; r.addEventListener('change', refreshPrintPanel); }
+            });
+        });
     }
 
     var _selectedJaContact = {};
@@ -4548,6 +5381,16 @@
             initCaseTypeSwitcher();
             if (currentGroup === '日语组') loadJaContacts();
             if (currentGroup === '英语组') loadEnContacts();
+
+            if (currentGroup === '日语组') {
+                var jaCaseRadios = containerEl.querySelectorAll('input[name="ja-case-type"]');
+                jaCaseRadios.forEach(function (r) {
+                    r.addEventListener('change', function () { setTimeout(applyUserPreferences, 0); });
+                });
+            }
+            setTimeout(applyUserPreferences, 0);
+            _bindPrintControls();
+            setTimeout(applyPrintPreferences, 0);
         },
 
         destroy: function () {

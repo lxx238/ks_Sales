@@ -261,6 +261,31 @@ def list_all_records_raw():
         connection.close()
 
 
+def list_all_prices():
+    """返回全部物料的 {code: {name, spec, price_usd, price_3_5_usd, category}} 轻量价格映射，
+    供围栏/门报价计算动态取价使用。"""
+    connection = _get_fence_db_connection()
+    try:
+        rows = connection.execute(
+            f'SELECT code, name, spec, price_usd, price_3_5_usd, category FROM {TABLE}'
+        ).fetchall()
+        result = {}
+        for r in rows:
+            code = str(r['code'] or '').strip()
+            if not code:
+                continue
+            result[code] = {
+                'name': str(r['name'] or '').strip(),
+                'spec': str(r['spec'] or '').strip(),
+                'price_usd': float(r['price_usd'] or 0),
+                'price_3_5_usd': (float(r['price_3_5_usd']) if r['price_3_5_usd'] is not None else None),
+                'category': str(r['category'] or '').strip(),
+            }
+        return result
+    finally:
+        connection.close()
+
+
 def list_image_records():
     connection = _get_fence_db_connection()
     try:

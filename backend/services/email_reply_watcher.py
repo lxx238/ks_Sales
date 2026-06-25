@@ -1271,15 +1271,9 @@ def _check_email_replies_inner(include_seen: bool = True) -> Dict[str, Any]:
 
         _log(f'Found {len(quotation_tasks)} quotation emails, {len(image_tasks)} image inquiry emails')
 
-        for msg_id, mid in quotation_tasks:
-            try:
-                scanned, parsed_count, forwarded = _process_one_email(
-                    imap, msg_id, mid, scanned, parsed_count, forwarded
-                )
-            except Exception as exc:
-                _log(f'Error processing quotation email {msg_id}: {exc}')
-                import traceback
-                traceback.print_exc()
+        # 询价已改为网页填价，不再处理询价回复邮件；仅处理询图回复。
+        if quotation_tasks:
+            _log(f'Skipping {len(quotation_tasks)} quotation reply email(s) — inquiry is now web-form based')
 
         for msg_id, mid in image_tasks:
             try:

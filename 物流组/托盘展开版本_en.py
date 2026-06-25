@@ -127,9 +127,9 @@ def load_pallet_data(json_file_path):
 
 def parse_volume(volume_str):
     """解析体积字符串，如 '<2.9*0.7*0.6>' 返回 (2.9, 0.7, 0.6)"""
-    match = re.search(r'<([\d\.]+)\*([\d\.]+)\*([\d\.]+)>', volume_str)
-    if match:
-        return float(match.group(1)), float(match.group(2)), float(match.group(3))
+    nums = re.findall(r'(\d+(?:\.\d+)?)', str(volume_str))
+    if len(nums) >= 3:
+        return float(nums[0]), float(nums[1]), float(nums[2])
     return 0, 0, 0
 
 def extract_number(quantity_str):
@@ -247,6 +247,11 @@ def resolve_material_info(material_db, code):
     stripped_parts = strip_middle_b10(code)
     display_code = '-'.join(stripped_parts)
 
+    if len(stripped_parts) == 2 and re.search(r'\d', stripped_parts[0]):
+        num_match = re.search(r'(\d+)', stripped_parts[-1])
+        if num_match:
+            spec = num_match.group(1)
+
     # 优先用去除B10后的完整编码查询（如 CR-2001, SB-0001）
     db_info = _lookup_db(material_db, display_code)
     if not db_info:
@@ -258,7 +263,7 @@ def resolve_material_info(material_db, code):
         db_info = _lookup_db(material_db, code)
 
     if not db_info:
-        return '', '', 0, ''
+        return '', spec, 0, ''
 
     description = db_info['工程品名_英语']
     db_unit = db_info['计价单位']
@@ -1003,10 +1008,16 @@ if __name__ == "__main__":
     project_dir = os.path.dirname(script_dir)
     session_output = os.environ.get('SESSION_OUTPUT_DIR', os.path.join(script_dir, "output"))
     output_filename = os.environ.get('OUTPUT_FILENAME', '物流汇总表v10_en.xlsx')
+    _db_candidates = [
+        os.path.join(script_dir, "input", "物料数据库.db"),
+        os.path.join(project_dir, "input", "物料数据库.db"),
+        os.path.join(project_dir, "物料数据库.db"),
+    ]
+    db_path = next((p for p in _db_candidates if os.path.exists(p)), _db_candidates[-1])
     create_excel_from_pallets(
         output_file_path=os.path.join(session_output, output_filename),
         pallet_json_path=os.path.join(session_output, "托盘清单.json"),
         chinese_json_path=os.path.join(session_output, "中文包装清单参考.json"),
         english_json_path=os.path.join(session_output, "英文单套预装明细.json"),
-        db_path=os.path.join(project_dir, "物料数据库.db")
+        db_path=db_path
     )

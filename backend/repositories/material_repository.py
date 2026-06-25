@@ -19,6 +19,7 @@ from backend.utils.constants import (
     DB_NAME_EN_COLUMN,
     DB_NAME_FR_COLUMN,
     DB_NAME_ES_COLUMN,
+    DB_NAME_ZH_COLUMN,
     DB_NAME_JA_COLUMN,
     DB_PILE_15_18UM_CODE_COLUMN,
     DB_PILE_15_18UM_PRICE_EUR,
@@ -140,6 +141,11 @@ def ensure_aluminum_schema(connection):
             f'ALTER TABLE {DB_TABLE_NAME} ADD COLUMN "{DB_NAME_ES_COLUMN}" TEXT'
         )
         connection.commit()
+    if DB_NAME_ZH_COLUMN not in columns:
+        connection.execute(
+            f'ALTER TABLE {DB_TABLE_NAME} ADD COLUMN "{DB_NAME_ZH_COLUMN}" TEXT'
+        )
+        connection.commit()
 
 
 def ensure_change_request_table(connection):
@@ -209,6 +215,7 @@ def fetch_material_rows(material_codes, price_column=None, include_images=True):
                     "{DB_NAME_EN_COLUMN}",
                     "{DB_NAME_FR_COLUMN}",
                     "{DB_NAME_ES_COLUMN}",
+                    "{DB_NAME_ZH_COLUMN}",
                     "{DB_NAME_JA_COLUMN}",
                     "{DB_UNIT_COLUMN}",
                     "{price_col}",

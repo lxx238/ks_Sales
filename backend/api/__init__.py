@@ -14,6 +14,7 @@ from .public_dashboard import public_dashboard_bp
 from .unified_contacts import unified_contacts_bp
 from .question import question_bp
 from .quotation import quotation_bp
+from .schedule import schedule_bp
 from .temp_price import temp_price_bp
 from .pile_price import pile_price_bp
 from .upload import upload_bp
@@ -42,3 +43,4 @@ def register_blueprints(app):
     app.register_blueprint(public_dashboard_bp)
     app.register_blueprint(pile_price_bp)
     app.register_blueprint(logistics_bp)
+    app.register_blueprint(schedule_bp)

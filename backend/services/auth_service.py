@@ -6,6 +6,7 @@ from flask import session
 from backend.repositories.user_repository import (
     ROLE_TARGETS,
     bulk_import_accounts,
+    bulk_update_dingtalk_id,
     delete_account,
     get_account_by_username,
     list_accounts,
@@ -13,6 +14,7 @@ from backend.repositories.user_repository import (
     save_account,
     set_account_enabled,
     update_account_password,
+    update_user_preferences,
     verify_account_password,
 )
 from backend.utils.validators import ensure_json_payload, ensure_required_value
@@ -23,6 +25,7 @@ ROLE_LABEL_TO_KEY = {v: k for k, v in {
     '英语业务员': '英语业务员',
     '日语业务员': '日语业务员',
     '业务助理': '业务助理',
+    '总助': '总助',
     '物流专员': '物流专员',
 }.items()}
 
@@ -102,7 +105,7 @@ def generate_import_template():
 
 SESSION_USER_KEY = 'ks_auth_username'
 
-ROLE_OPTIONS = {'admin', '韩语业务员', '英语业务员', '日语业务员', '业务助理', '物流专员'}
+ROLE_OPTIONS = {'admin', '韩语业务员', '英语业务员', '日语业务员', '亚太业务员', '业务助理', '总助', '物流专员'}
 
 ALL_PERMISSIONS = [
     'quotation',
@@ -114,6 +117,7 @@ ALL_PERMISSIONS = [
     'records_review',
     'questions',
     'logistics',
+    'schedule',
 ]
 
 
@@ -160,6 +164,57 @@ def ensure_permission(permission):
     return account
 
 
+def ensure_role(*roles):
+    """要求当前账号角色在指定列表中（admin 自动放行）。"""
+    account = get_current_account()
+    if account.get('role') == 'admin':
+        return account
+    if account.get('role') not in roles:
+        raise PermissionError('没有该功能的访问权限')
+    return account
+
+
+def ensure_group(*groups):
+    """要求当前账号所属组在指定列表中（admin 自动放行）。
+
+    用于区分"设计组"等需按 group 而非 role 判断的功能，
+    因为业务助理角色同时被日语组(业务)与设计组(设计)共用。
+    """
+    account = get_current_account()
+    if account.get('role') == 'admin':
+        return account
+    if account.get('group') not in groups:
+        raise PermissionError('没有该功能的访问权限')
+    return account
+
+
+def ensure_any_permission(*permissions):
+    """要求当前账号拥有任意一个权限（admin 自动放行）。"""
+    account = get_current_account()
+    if account.get('role') == 'admin':
+        return account
+    perms = account.get('permissions') or []
+    if not any(p in perms for p in permissions):
+        raise PermissionError('没有该功能的访问权限')
+    return account
+
+
+def ensure_temp_price_access(write=False):
+    """临时价格读写权限：admin / 设计组 / 拥有 temp-price 权限者可读写；
+    拥有 quotation 权限者（业务员）仅可读（用于报价时查阅价格）。"""
+    account = get_current_account()
+    if account.get('role') == 'admin':
+        return account
+    if account.get('group') == '设计组':
+        return account
+    perms = account.get('permissions') or []
+    if 'temp-price' in perms:
+        return account
+    if not write and 'quotation' in perms:
+        return account
+    raise PermissionError('没有该功能的访问权限')
+
+
 def normalize_account_payload(data):
     ensure_json_payload(data)
 
@@ -176,6 +231,7 @@ def normalize_account_payload(data):
     fax = str((data or {}).get('fax') or '').strip()
     email = str((data or {}).get('email') or '').strip()
     group = str((data or {}).get('group') or '').strip()
+    dingtalk_id = str((data or {}).get('dingtalkId') or (data or {}).get('dingtalk_id') or '').strip()
 
     ensure_required_value(role, '角色不能为空')
     if role not in ROLE_OPTIONS:
@@ -194,6 +250,7 @@ def normalize_account_payload(data):
         'tel': tel,
         'fax': fax,
         'email': email,
+        'dingtalkId': dingtalk_id,
         'group': group,
     }
 
@@ -234,6 +291,24 @@ def get_current_user():
         return {'success': False, 'message': str(exc)}, 401
     except Exception as exc:
         return {'success': False, 'message': f'查询失败: {exc}'}, 500
+
+
+def save_my_preferences(data):
+    try:
+        ensure_json_payload(data)
+        account = get_current_account()
+        incoming = (data or {}).get('preferences')
+        if not isinstance(incoming, dict):
+            return {'success': False, 'message': 'preferences 必须是对象'}, 400
+        merged = update_user_preferences(account['username'], incoming)
+        if merged is None:
+            return {'success': False, 'message': '账号不存在'}, 404
+        account['preferences'] = merged
+        return {'success': True, 'data': account, 'message': '习惯已保存'}, 200
+    except PermissionError as exc:
+        return {'success': False, 'message': str(exc)}, 401
+    except Exception as exc:
+        return {'success': False, 'message': f'保存失败: {exc}'}, 500
 
 
 def list_account_items():
@@ -279,6 +354,7 @@ def upsert_account_item(data):
             fax=normalized.get('fax', ''),
             email=normalized.get('email', ''),
             group=normalized.get('group', ''),
+            dingtalk_id=normalized.get('dingtalkId', ''),
         )
         return {'success': True, 'data': account, 'message': '账号已保存'}, 200
     except PermissionError as exc:
@@ -395,6 +471,121 @@ def import_account_items(file_storage):
             'successCount': success_count,
             'failedCount': failed_count,
             'failedItems': results['failed'],
+        }, 200
+    except PermissionError as exc:
+        return {'success': False, 'message': str(exc)}, 403
+    except ValueError as exc:
+        return {'success': False, 'message': str(exc)}, 400
+    except Exception as exc:
+        return {'success': False, 'message': f'导入失败: {exc}'}, 500
+
+
+USERID_COLUMN_KEYS = [
+    '员工userid', 'userid', '钉钉userid', 'dingtalkid', 'dingtalk_id', 'user_id',
+]
+NAME_COLUMN_KEYS = ['姓名', '中文名', 'name', 'name_china', '员工姓名']
+
+
+def _normalize_column_key(value):
+    return str(value or '').strip().lower().replace(' ', '').replace('_', '').replace('-', '')
+
+
+def _clean_cell(value):
+    if value is None:
+        return ''
+    text = str(value).strip()
+    return '' if text.lower() in ('nan', 'none') else text
+
+
+def _match_column(df, keys):
+    normalized = {}
+    for col in df.columns:
+        normalized[_normalize_column_key(col)] = col
+    for key in keys:
+        target = _normalize_column_key(key)
+        if target in normalized:
+            return normalized[target]
+    return None
+
+
+def parse_dingtalk_userid_excel(file_storage):
+    if not file_storage or not file_storage.filename:
+        raise ValueError('请选择要上传的 Excel 文件')
+
+    filename = str(file_storage.filename).lower()
+    if not (filename.endswith('.xlsx') or filename.endswith('.xls')):
+        raise ValueError('仅支持 .xlsx 或 .xls 格式的 Excel 文件')
+
+    try:
+        raw = pd.read_excel(file_storage, dtype=str, header=None)
+    except Exception as exc:
+        raise ValueError(f'Excel 文件读取失败: {exc}')
+
+    if raw is None or raw.empty or raw.shape[1] == 0:
+        raise ValueError('Excel 文件没有有效的列')
+
+    name_keys = {_normalize_column_key(k) for k in NAME_COLUMN_KEYS}
+    userid_keys = {_normalize_column_key(k) for k in USERID_COLUMN_KEYS}
+
+    name_col = None
+    userid_col = None
+    header_row = None
+    scan_rows = min(len(raw), 15)
+    for ridx in range(scan_rows):
+        row = raw.iloc[ridx].tolist()
+        row_map = {}
+        for cidx, val in enumerate(row):
+            row_map.setdefault(_normalize_column_key(val), cidx)
+        nc = next((row_map[k] for k in name_keys if k in row_map), None)
+        uc = next((row_map[k] for k in userid_keys if k in row_map), None)
+        if nc is not None and uc is not None and nc != uc:
+            name_col, userid_col, header_row = nc, uc, ridx
+            break
+
+    if name_col is None or userid_col is None:
+        raise ValueError(
+            '未识别到「姓名」与「UserId」列。请确保包含姓名列（姓名/中文名）和 UserId 列'
+            '（员工UserId/UserId/钉钉UserID）'
+        )
+
+    body = raw.iloc[header_row + 1:].reset_index(drop=True)
+
+    updates = []
+    for i in range(len(body)):
+        name = _clean_cell(body.iloc[i, name_col])
+        userid = _clean_cell(body.iloc[i, userid_col])
+        if not name or not userid:
+            continue
+        updates.append({'name': name, 'dingtalk_id': userid})
+
+    if not updates:
+        raise ValueError('Excel 中没有找到有效的姓名与 UserId 数据')
+
+    return updates
+
+
+def import_dingtalk_userids(file_storage):
+    try:
+        ensure_admin_account()
+        updates = parse_dingtalk_userid_excel(file_storage)
+        results = bulk_update_dingtalk_id(updates)
+
+        total = len(updates)
+        success_count = len(results['success'])
+        failed_count = len(results['failed'])
+
+        message = f'导入完成：共 {total} 条，成功匹配并更新 {success_count} 条'
+        if failed_count > 0:
+            message += f'，未匹配 {failed_count} 条'
+
+        return {
+            'success': True,
+            'message': message,
+            'total': total,
+            'successCount': success_count,
+            'failedCount': failed_count,
+            'failedItems': results['failed'],
+            'updatedItems': results['success'],
         }, 200
     except PermissionError as exc:
         return {'success': False, 'message': str(exc)}, 403

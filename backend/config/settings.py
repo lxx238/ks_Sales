@@ -25,7 +25,7 @@ def get_db_connection():
     return conn
 
 
-def _load_env_file(path: Path) -> None:
+def _load_env_file(path: Path, overwrite: bool = False) -> None:
     if not path.exists():
         return
 
@@ -41,7 +41,9 @@ def _load_env_file(path: Path) -> None:
 
         name, value = line.split('=', 1)
         key = name.strip()
-        if not key or key in os.environ:
+        if not key:
+            continue
+        if not overwrite and key in os.environ:
             continue
 
         os.environ[key] = value.strip().strip('"').strip("'")
@@ -96,6 +98,64 @@ if _raw_check_interval:
         INQUIRY_CHECK_INTERVAL_MINUTES = int(_raw_check_interval)
     except ValueError:
         pass
+
+
+# ---- 钉钉企业内部应用（工作通知，定向给老板）----
+DINGTALK_APP_KEY = os.getenv('KS_DINGTALK_APP_KEY', '').strip()
+DINGTALK_APP_SECRET = os.getenv('KS_DINGTALK_APP_SECRET', '').strip()
+_raw_dingtalk_agent = os.getenv('KS_DINGTALK_AGENT_ID', '').strip()
+DINGTALK_AGENT_ID = _raw_dingtalk_agent
+DINGTALK_BOSS_USERID = os.getenv('KS_DINGTALK_BOSS_USERID', '').strip()
+DINGTALK_BOSS_MOBILE = os.getenv('KS_DINGTALK_BOSS_MOBILE', '').strip()
+# 机器人 robotCode（新版平台机器人单聊接口需要，默认用 AppKey）
+DINGTALK_ROBOT_CODE = os.getenv('KS_DINGTALK_ROBOT_CODE', '').strip()
+# ---- 钉钉自定义群机器人（Webhook，发到群）更简单，优先于工作通知 ----
+DINGTALK_WEBHOOK = os.getenv('KS_DINGTALK_WEBHOOK', '').strip()
+DINGTALK_WEBHOOK_SECRET = os.getenv('KS_DINGTALK_WEBHOOK_SECRET', '').strip()
+DINGTALK_SENDER_NAME = os.getenv('KS_DINGTALK_SENDER_NAME', '总助').strip()
+# 发送模式：auto(默认,按配置自动选) / robot(机器人单聊) / worknotify(工作通知) / webhook(群机器人)
+DINGTALK_SEND_MODE = os.getenv('KS_DINGTALK_SEND_MODE', 'auto').strip().lower()
+# 每日晨报是否以钉钉「公告」形式发送（需开通 qyapi_blackboard_manage 权限）
+DINGTALK_BRIEFING_ANNOUNCEMENT = os.getenv('KS_DINGTALK_BRIEFING_ANNOUNCEMENT', '').strip().lower() in ('1', 'true', 'yes', 'on')
+SCHEDULE_TIMEZONE = os.getenv('KS_SCHEDULE_TIMEZONE', 'Asia/Shanghai').strip()
+# 对外可访问的基础地址（用于钉钉消息里的「本周行程表」链接，需老板手机能打开）
+PUBLIC_BASE_URL = os.getenv('KS_PUBLIC_BASE_URL', '').strip()
+
+# ---- 询价提醒机器人（独立钉钉应用）----
+INQUIRY_DT_APP_KEY = os.getenv('KS_INQUIRY_DT_APP_KEY', '').strip()
+INQUIRY_DT_APP_SECRET = os.getenv('KS_INQUIRY_DT_APP_SECRET', '').strip()
+INQUIRY_DT_AGENT_ID = os.getenv('KS_INQUIRY_DT_AGENT_ID', '').strip()
+INQUIRY_DT_TARGET_USERID = os.getenv('KS_INQUIRY_DT_TARGET_USERID', '').strip()
+# 机器人 robotCode（新版机器人单聊需要，默认用 AppKey）
+INQUIRY_DT_ROBOT_CODE = os.getenv('KS_INQUIRY_DT_ROBOT_CODE', '').strip()
+INQUIRY_REMINDER_INTERVAL = int(os.getenv('KS_INQUIRY_REMINDER_INTERVAL', '0').strip() or '0')
+
+
+def reload_dingtalk_env():
+    global DINGTALK_APP_KEY, DINGTALK_APP_SECRET, DINGTALK_AGENT_ID
+    global DINGTALK_BOSS_USERID, DINGTALK_BOSS_MOBILE, DINGTALK_SENDER_NAME
+    global DINGTALK_WEBHOOK, DINGTALK_WEBHOOK_SECRET, DINGTALK_ROBOT_CODE, DINGTALK_SEND_MODE, DINGTALK_BRIEFING_ANNOUNCEMENT, PUBLIC_BASE_URL
+    global INQUIRY_DT_APP_KEY, INQUIRY_DT_APP_SECRET, INQUIRY_DT_AGENT_ID, INQUIRY_DT_TARGET_USERID, INQUIRY_DT_ROBOT_CODE, INQUIRY_REMINDER_INTERVAL
+    _load_env_file(BASE_DIR / '.env')
+    _load_env_file(BASE_DIR / '.env.local', overwrite=True)
+    DINGTALK_APP_KEY = os.getenv('KS_DINGTALK_APP_KEY', '').strip()
+    DINGTALK_APP_SECRET = os.getenv('KS_DINGTALK_APP_SECRET', '').strip()
+    DINGTALK_AGENT_ID = os.getenv('KS_DINGTALK_AGENT_ID', '').strip()
+    DINGTALK_BOSS_USERID = os.getenv('KS_DINGTALK_BOSS_USERID', '').strip()
+    DINGTALK_BOSS_MOBILE = os.getenv('KS_DINGTALK_BOSS_MOBILE', '').strip()
+    DINGTALK_WEBHOOK = os.getenv('KS_DINGTALK_WEBHOOK', '').strip()
+    DINGTALK_WEBHOOK_SECRET = os.getenv('KS_DINGTALK_WEBHOOK_SECRET', '').strip()
+    DINGTALK_ROBOT_CODE = os.getenv('KS_DINGTALK_ROBOT_CODE', '').strip()
+    DINGTALK_SEND_MODE = os.getenv('KS_DINGTALK_SEND_MODE', 'auto').strip().lower()
+    DINGTALK_BRIEFING_ANNOUNCEMENT = os.getenv('KS_DINGTALK_BRIEFING_ANNOUNCEMENT', '').strip().lower() in ('1', 'true', 'yes', 'on')
+    DINGTALK_SENDER_NAME = os.getenv('KS_DINGTALK_SENDER_NAME', '总助').strip()
+    PUBLIC_BASE_URL = os.getenv('KS_PUBLIC_BASE_URL', '').strip()
+    INQUIRY_DT_APP_KEY = os.getenv('KS_INQUIRY_DT_APP_KEY', '').strip()
+    INQUIRY_DT_APP_SECRET = os.getenv('KS_INQUIRY_DT_APP_SECRET', '').strip()
+    INQUIRY_DT_AGENT_ID = os.getenv('KS_INQUIRY_DT_AGENT_ID', '').strip()
+    INQUIRY_DT_TARGET_USERID = os.getenv('KS_INQUIRY_DT_TARGET_USERID', '').strip()
+    INQUIRY_DT_ROBOT_CODE = os.getenv('KS_INQUIRY_DT_ROBOT_CODE', '').strip()
+    INQUIRY_REMINDER_INTERVAL = int(os.getenv('KS_INQUIRY_REMINDER_INTERVAL', '0').strip() or '0')
 
 
 def ensure_directories():

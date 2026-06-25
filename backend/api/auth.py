@@ -5,11 +5,13 @@ from backend.services.auth_service import (
     generate_import_template,
     get_current_user,
     import_account_items,
+    import_dingtalk_userids,
     list_account_items,
     login_user,
     logout_user,
     reset_account_items,
     reset_account_password,
+    save_my_preferences,
     toggle_account_item,
     upsert_account_item,
 )
@@ -36,6 +38,12 @@ def current_user_route():
     return jsonify(payload), status
 
 
+@auth_bp.post('/me/preferences')
+def save_preferences_route():
+    payload, status = save_my_preferences(request.get_json(silent=True))
+    return jsonify(payload), status
+
+
 @auth_bp.get('/accounts')
 def list_accounts_route():
     payload, status = list_account_items()
@@ -52,6 +60,13 @@ def upsert_account_route():
 def import_accounts_route():
     file = request.files.get('file')
     payload, status = import_account_items(file)
+    return jsonify(payload), status
+
+
+@auth_bp.post('/accounts/import-userids')
+def import_userids_route():
+    file = request.files.get('file')
+    payload, status = import_dingtalk_userids(file)
     return jsonify(payload), status
 
 

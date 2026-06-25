@@ -259,12 +259,11 @@
 
     function buildHtml() {
         return '<section class="section">' +
+            '<h2 style="margin:0 0 12px;font-size:16px;font-weight:700">固定物料价格查询</h2>' +
             buildWarning() +
             buildCurrencySelector() +
-            buildFilterButtons() +
             '<div class="tpq-section">' + buildQueryTable() + '</div>' +
             '<div class="tpq-section">' + buildStatistics() + '</div>' +
-            '<div class="tpq-section">' + buildRefTable() + '</div>' +
             '</section>';
     }
 

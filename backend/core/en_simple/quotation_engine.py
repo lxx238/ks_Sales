@@ -7,6 +7,7 @@ from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.worksheet.page import PageMargins
+from backend.core.print_settings import apply_print_setup
 
 
 def _safe_int(val, default=0):
@@ -46,6 +47,7 @@ from backend.core.shared.text_utils import (
 )
 from backend.core.shared.product_utils import (
     _is_valid_product_code,
+    normalize_preinstall,
 )
 from backend.core.shared.constants import (
     CARBON_STEEL_PRICING_ATTRS,
@@ -97,6 +99,7 @@ _LANG_NAME_KEY_MAP = {
     'en': ('name_en',),
     'fr': ('name_fr', 'name_en'),
     'es': ('name_es', 'name_en'),
+    'zh': ('name_zh', 'name'),
 }
 
 
@@ -556,6 +559,8 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
                         'spec': product.get('spec', ''),
                         'quantity': product.get('quantity', 0),
                         'unit': price_info.get('unit', '') if price_info else '',
+                        'weight': product.get('weight', 0),
+                        'preinstall': normalize_preinstall(product.get('preinstall')),
                         'issue_reason': 'No price match',
                     })
 
@@ -633,10 +638,20 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
                     inquiry_rows.append(row)
                     inquiry_price_sum += total_price
             else:
-                _set_cell(ws, row, col_total_price, f"=F{row}*{qty_formula_letter}{row}",
+                _set_cell(ws, row, col_total_price, f"=N(F{row})*{qty_formula_letter}{row}",
                           font=normal_font, align=center_align, border=thin_border,
                           number_format=currency_number_format)
-                if not is_matched:
+                if price_info:
+                    _uc = _get_discount_category(price_info)
+                    if _uc == 'steel':
+                        steel_rows.append(row)
+                    elif _uc == 'purchased':
+                        purchased_rows.append(row)
+                    elif _uc == 'standard':
+                        standard_rows.append(row)
+                    else:
+                        inquiry_rows.append(row)
+                elif not is_matched:
                     unmatched_rows.append(row)
 
             if need_weight_code:
@@ -794,6 +809,7 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
     part1_steel_price = 0.0
     part1_purchased_price = 0.0
     part1_inq_price = 0.0
+    part3_total_all = 0.0
     is_complex = False
     if combined_products:
         _write_group_header(current_row)
@@ -858,12 +874,7 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
 
     grand_total = part1_total_all + part3_total_all
 
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.75, bottom=0.75, left=0.7, right=0.7, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'en_simple')
 
     if unmatched_products_out is not None:
         for _up in local_unmatched:
@@ -1169,7 +1180,7 @@ def create_summary_sheet(
             ws.cell(row=r, column=9, value=qr.get('part1_price_per_table', 0)).number_format = ksd_currency_fmt
         ws.cell(row=r, column=9).alignment = center
         ws.merge_cells(f'I{r}:K{r}')
-        ws.cell(row=r, column=12, value=f'=I{r}').number_format = ksd_currency_fmt
+        ws.cell(row=r, column=12, value=f'=I{r}*F{r}').number_format = ksd_currency_fmt
         ws.cell(row=r, column=12).alignment = center
         ws.merge_cells(f'L{r}:M{r}')
         for ci in range(1, 13):
@@ -1198,12 +1209,8 @@ def create_summary_sheet(
         ws.cell(row=total_row, column=ci).border = thin_border
     ws.row_dimensions[total_row].height = 25
 
-    has_steel = any(qr.get('part1_steel_rows') for qr in all_quotation_results)
-    has_purchased = any(qr.get('part1_purchased_rows') for qr in all_quotation_results)
     if discount_method == 'unit_price':
         discount_formula = f'=L{total_row}'
-    elif ko_discount_rate == ko_steel_discount_rate == ko_purchased_discount_rate or (not has_steel and not has_purchased):
-        discount_formula = f'=L{total_row}*{ko_discount_rate}/100'
     else:
         discount_parts = []
         for qr in all_quotation_results:
@@ -1212,20 +1219,23 @@ def create_summary_sheet(
             md = qr.get('matrix_data') or matrix_data
             sc = md.get('set_count') or qr.get('set_count') or 1
             sc = _safe_int(sc, 1)
+            tpc = qr.get('detail_total_price_col_letter', 'H')
+            mult = f'*{sc}' if sc != 1 else ''
             for rows_key, rate in [
                 ('part1_standard_rows', ko_discount_rate),
                 ('part1_steel_rows', ko_steel_discount_rate),
                 ('part1_purchased_rows', ko_purchased_discount_rate),
                 ('part1_inquiry_rows', 100),
+                ('part1_unmatched_rows', 100),
             ]:
                 rows = qr.get(rows_key, [])
                 if not rows:
                     continue
-                refs = ','.join(f"'{sn_esc}'!{qr.get('detail_total_price_col_letter', 'H')}{r}" for r in rows)
+                refs = ','.join(f"'{sn_esc}'!{tpc}{r}" for r in rows)
                 if rate == 100:
-                    discount_parts.append(f"SUM({refs})")
+                    discount_parts.append(f"SUM({refs}){mult}")
                 else:
-                    discount_parts.append(f"SUM({refs})*{rate}/100")
+                    discount_parts.append(f"SUM({refs}){mult}*{rate}/100")
         if discount_parts:
             discount_formula = '=' + '+'.join(discount_parts)
             if len(discount_formula) > 8000:
@@ -1493,12 +1503,7 @@ def create_summary_sheet(
         name='Arial', size=12, color='FF0000')
     ws.cell(row=hint_row, column=1).alignment = left_bottom
 
-    ws.page_setup.orientation = 'portrait'
-    ws.page_setup.paperSize = 9
-    ws.page_setup.fitToPage = True
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.page_margins = PageMargins(top=0.75, bottom=0.75, left=0.7, right=0.7, header=0.3, footer=0.3)
+    apply_print_setup(ws, 'en_simple')
 
     sheet_names = workbook.sheetnames
     if 'Total' in sheet_names:

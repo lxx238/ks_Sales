@@ -195,6 +195,7 @@ _HEADER_FIELD_MAP = {
     '数量': ['数量', 'Qty.', 'Quantity'],
     '单重': ['单重', 'Weight', '重量'],
     '备注': ['备注', 'Remark', 'Notes'],
+    '预装情况': ['预装'],
 }
 
 
@@ -332,7 +333,9 @@ def _find_config_zip(parsed_rows, bom_row, max_row, search_end=None):
             if val is not None:
                 m = re.search(r'(\d+(?:\.\d+)?)', str(val))
                 if m:
-                    config['cross_span'] = m.group(1)
+                    num = float(m.group(1))
+                    if 500 <= num <= 20000:
+                        config['cross_span'] = m.group(1).rstrip('0').rstrip('.') if '.' in m.group(1) else m.group(1)
     return config
 
 
@@ -400,6 +403,7 @@ def _extract_products_zip(parsed_rows, header_row, end_row, col_mapping):
             'material': material, 'quantity': quantity, 'remark': remark,
             'weight': weight_decimal, 'weight_has_unit': weight_has_unit,
             'weight_unit': weight_unit, '_source_row': rn,
+            'preinstall': str(cells.get(col_mapping.get('预装情况', -1), '')).strip(),
         })
         seq += 1
     return products
