@@ -13,7 +13,7 @@
            Total price(USD) EXW | Discount Total price(USD) EXW |
            Discount Total price Of Spare Parts(USD) EXW | Remark
        其中价格列按「每基（per table）」计算（与 006 一致），汇总页再乘台数。
-    2) 一个汇总页（Sheet1）：每阵列一行（NO/Row/Column/Installation/Angle/Table/Power kw/
+    2) 一个汇总页（Total）：每阵列一行（NO/Row/Column/Installation/Angle/Table/Power kw/
        Price(USD)/Table / Amount(USD) / Total Amount after Special Discount）+ 抬头 +
        EXW TOTAL AMOUNT + Unite Price/W。
 
@@ -729,13 +729,13 @@ def create_ap_ground_summary_sheet(
         validity_days=7, ap_special_discount_rate=100, module_wattage=None,
         image_path=None, container_details=None,
 ):
-    """创建汇总页 Sheet1（每阵列一行 + 抬头 + 合计）。"""
+    """创建汇总页 Total（每阵列一行 + 抬头 + 合计）。"""
     from datetime import datetime
     matrix_data = matrix_data or {}
     contact_info = contact_info or {}
     project_name = str(matrix_data.get('project_name') or '').strip()
 
-    ws = workbook.create_sheet(title='Sheet1')
+    ws = workbook.create_sheet(title='Total')
 
     thin = Side(style='thin', color='000000')
     thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -1051,8 +1051,8 @@ def create_ap_ground_summary_sheet(
 
     # 汇总页置顶
     sheet_names = workbook.sheetnames
-    if 'Sheet1' in sheet_names:
-        idx = sheet_names.index('Sheet1')
-        workbook.move_sheet('Sheet1', offset=-idx)
-    print(f"   [AP-GROUND] Summary sheet(Sheet1) created")
-    return 'Sheet1'
+    if 'Total' in sheet_names:
+        idx = sheet_names.index('Total')
+        workbook.move_sheet('Total', offset=-idx)
+    print(f"   [AP-GROUND] Summary sheet(Total) created")
+    return 'Total'

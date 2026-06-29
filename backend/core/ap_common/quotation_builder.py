@@ -92,7 +92,7 @@ def split_and_create_quotations(
     ap_purchased_discount_rate = kwargs.get('ap_purchased_discount_rate', 100)
     ap_freight = kwargs.get('ap_freight', 0)
     dest_port = dest_port or kwargs.get('dest_port') or 'XIAMEN'
-    module_wattage = kwargs.get('module_wattage')
+    module_wattage = kwargs.get('module_wattage') or (matrix_data or {}).get('module_wattage')
     if output_dir is None:
         output_dir = os.path.join(os.path.dirname(input_file), 'quotation_output')
     os.makedirs(output_dir, exist_ok=True)

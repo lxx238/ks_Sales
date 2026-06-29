@@ -869,6 +869,10 @@
             </div>
           </div>
         </div>
+        <div id="ap-freight-row" style="display: none; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-top: 8px;">
+          <span style="width: 120px;">运费(USD)</span>
+          <input type="number" id="ap-freight-amount" value="0" step="1" min="0" placeholder="运费金额" style="width: 120px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+        </div>
         <div id="ap-port-row" style="display: none; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-top: 8px;">
           <span style="width: 120px;">港口</span>
           <select id="ap-port" style="width: 120px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
@@ -2366,6 +2370,10 @@
             if (containerRow) {
                 containerRow.style.display = (isApGroundCase() && needFreight) ? 'block' : 'none';
             }
+            var apFreightRow = document.getElementById('ap-freight-row');
+            if (apFreightRow) {
+                apFreightRow.style.display = (!isApGroundCase() && needFreight) ? 'flex' : 'none';
+            }
             if (portRow) {
                 portRow.style.display = ['EXW', 'FOB', 'CIF'].indexOf(method) >= 0 ? 'flex' : 'none';
             }
@@ -2388,7 +2396,7 @@
         function updateApModuleWattageVisibility() {
             var wattRow = document.getElementById('ap-module-wattage-row');
             if (wattRow) {
-                wattRow.style.display = isApGroundCase() ? 'flex' : 'none';
+                wattRow.style.display = 'none';
             }
         }
 
@@ -3609,7 +3617,7 @@
                 requestBody.trade_method = apTradeMethodEl ? apTradeMethodEl.value : 'EXW';
 
                 var apNeedFreight = ['FOB', 'CIF'].indexOf(requestBody.trade_method) >= 0;
-                if (apNeedFreight) {
+                if (apNeedFreight && requestBody.ap_case_type === 'GROUND') {
                     var apContainers = [];
                     [['20GP', 'ap-ct-20gp', 'ap-qty-20gp', 'ap-freight-20gp'],
                      ['40HQ', 'ap-ct-40hq', 'ap-qty-40hq', 'ap-freight-40hq']].forEach(function (cfg) {
@@ -3627,6 +3635,9 @@
                     requestBody.ap_freight = apContainers.reduce(function (s, c) {
                         return s + c.qty * c.freight_per_unit;
                     }, 0);
+                } else if (apNeedFreight) {
+                    var apFreightAmountEl = document.getElementById('ap-freight-amount');
+                    requestBody.ap_freight = apFreightAmountEl ? (parseFloat(apFreightAmountEl.value) || 0) : 0;
                 } else {
                     requestBody.ap_freight = 0;
                 }

@@ -200,6 +200,19 @@ def build_bom_matrix_data(matrix_data, matched_array, bom_config=None):
     except (TypeError, ValueError):
         pass
 
+    # 布板方式（BOM 的 layout 横放/竖放）为工程权威来源，覆盖信息表朝向（横置き/縦置き）
+    if bom_config:
+        _bom_layout = str(bom_config.get('layout') or '').strip()
+        _ja_layout = None
+        if _bom_layout in ('横放', '横'):
+            _ja_layout = '横置き'
+        elif _bom_layout in ('竖放', '纵放', '竖', '纵'):
+            _ja_layout = '縦置き'
+        if _ja_layout:
+            bom_matrix_data['layout'] = _ja_layout
+            if isinstance(matrix_data, dict):
+                matrix_data['layout'] = _ja_layout
+
     return bom_matrix_data
 
 

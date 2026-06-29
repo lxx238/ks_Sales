@@ -285,6 +285,15 @@ def _find_config_zip(parsed_rows, bom_row, max_row, search_end=None):
                 if am:
                     config['angle'] = am.group(1)
 
+        if not config['layout'] and '布板方式' in row_str:
+            _, val = _find_label_value(cells, '布板方式')
+            if val is not None:
+                _lv = str(val)
+                if '竖' in _lv or '纵' in _lv:
+                    config['layout'] = '竖放'
+                elif '横' in _lv:
+                    config['layout'] = '横放'
+
         if '缺板' in row_str:
             _, val = _find_label_value(cells, '缺板')
             if val is not None:

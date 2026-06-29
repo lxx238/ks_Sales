@@ -323,50 +323,6 @@ def _extract_layout(df):
                 return '縦置き'
     return '横置き'
 
-    scan_rows = [8]
-    kw_row = _find_keyword_row(df, ['横置き', '縦置き', '横置', '縦置'])
-    if kw_row is not None and kw_row not in scan_rows:
-        scan_rows.append(kw_row)
-    for r in scan_rows:
-        if r >= df.shape[0]:
-            continue
-        for c in range(min(_SCAN_MAX_COL, df.shape[1])):
-            val = _safe_str(df.iat[r, c])
-            if val == '横置き' or val == '横置':
-                next_c = c + 1
-                if next_c < df.shape[1]:
-                    nv = _safe_str(df.iat[r, next_c])
-                    if nv in ('\u2713', '\u2714', '\u25cf', '\u25cb', 'o', 'O', '\u25a1', '\u2611', '*'):
-                        return '横置き'
-                prev_c = c - 1
-                if prev_c >= 0:
-                    pv = _safe_str(df.iat[r, prev_c])
-                    if pv in ('\u2713', '\u2714', '\u25cf', '\u25cb', 'o', 'O', '\u25a1', '\u2611', '*'):
-                        return '横置き'
-                return '横置き'
-            if val == '縦置き' or val == '縦置':
-                next_c = c + 1
-                if next_c < df.shape[1]:
-                    nv = _safe_str(df.iat[r, next_c])
-                    if nv in ('\u2713', '\u2714', '\u25cf', '\u25cb', 'o', 'O', '\u25a1', '\u2611', '*'):
-                        return '縦置き'
-                prev_c = c - 1
-                if prev_c >= 0:
-                    pv = _safe_str(df.iat[r, prev_c])
-                    if pv in ('\u2713', '\u2714', '\u25cf', '\u25cb', 'o', 'O', '\u25a1', '\u2611', '*'):
-                        return '縦置き'
-                return '縦置き'
-    for r in scan_rows:
-        if r >= df.shape[0]:
-            continue
-        for c in range(min(_SCAN_MAX_COL, df.shape[1])):
-            val = _safe_str(df.iat[r, c])
-            if '横' in val:
-                return '横置き'
-            if '縦' in val:
-                return '縦置き'
-    return '横置き'
-
 
 def _extract_ground_height(df):
     if df.shape[0] < 8:

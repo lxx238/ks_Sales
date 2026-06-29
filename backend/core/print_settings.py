@@ -92,7 +92,7 @@ CASE_DEFAULTS = {
         'margin_top': 0.5, 'margin_bottom': 0.5, 'margin_left': 0.25, 'margin_right': 0.25,
     },
     'ap_common': {
-        'orientation': 'landscape', 'fit_mode': 'fit_width',
+        'orientation': 'portrait', 'fit_mode': 'fit_width',
         'horizontal_centered': False,
         'margin_top': 0.75, 'margin_bottom': 0.75, 'margin_left': 0.7, 'margin_right': 0.7,
     },

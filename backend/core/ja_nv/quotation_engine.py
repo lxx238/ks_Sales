@@ -318,6 +318,7 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
         angle = ''
     if str(angle).lower() == 'nan' or str(angle).lower().strip('°') == 'nan':
         angle = ''
+    panel_layout = (matrix_data or {}).get('layout') or '横置き'
     ground_height = nv_params.get('ground_height') or matrix_data.get('ground_height') or ''
     span_ew = span_ew_override if span_ew_override is not None else (nv_params.get('span_ew') or '')
     sales_name = nv_params.get('sales_name') or 'Nanami'
@@ -343,7 +344,7 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
     else:
         angle_display = angle.rstrip('°').strip() if angle else ''
         angle_display = _strip_decimal_zero(angle_display)
-        _set(ws, 2, 6, f'横置き{angle_display}°' if angle_display else '', align=LEFT_A)
+        _set(ws, 2, 6, f'{panel_layout}{angle_display}°' if angle_display else '', align=LEFT_A)
     _set(ws, 2, 7, 'パネルサイズ', align=RIGHT_A)
     if is_inverter:
         _set(ws, 2, 8, '/')
@@ -1536,6 +1537,7 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
         return cell
 
     # ═══ HEADER ═══
+    panel_layout = (matrix_data or {}).get('layout') or '横置き'
 
     for _r in range(1, 18):
         ws.row_dimensions[_r].height = 15
@@ -1709,7 +1711,7 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
             _s(row, 4, missing_boards if missing_boards else '/')
             ws.cell(row=row, column=4).alignment = center
             _s(row, 5, inv_note or (f'{int(inverter_count)}台ＰＣＳ' if inverter_count and int(inverter_count) > 0 else ''), align=left_a)
-            angle_display = f'横置き {angle_text}' if angle_clean else ''
+            angle_display = f'{panel_layout} {angle_text}' if angle_clean else ''
             _s(row, 6, angle_display)
             _s(row, 7, '')
             ws.cell(row=row, column=7).fill = GRAY_FILL
@@ -1776,7 +1778,7 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
                     _s(row, 5, f'{int(inverter_count)}台ＰＣＳ', align=left_a)
                 else:
                     _s(row, 5, '', align=left_a)
-            angle_display = f'横置き {angle_text}' if angle_clean else ''
+            angle_display = f'{panel_layout} {angle_text}' if angle_clean else ''
             _s(row, 6, angle_display)
             _s(row, 7, '')
             ws.cell(row=row, column=7).fill = GRAY_FILL
@@ -2040,7 +2042,7 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
             ws.cell(row=row, column=4).alignment = center
             pile_inv_note = detail.get('inv_note', '') or (arr.get('note') or '')
             _s(row, 5, pile_inv_note, align=left_a)
-            angle_display = f'横置き {angle_text}' if angle_clean else ''
+            angle_display = f'{panel_layout} {angle_text}' if angle_clean else ''
             _s(row, 6, angle_display)
             _s(row, 7, '')
             ws.cell(row=row, column=7).fill = GRAY_FILL

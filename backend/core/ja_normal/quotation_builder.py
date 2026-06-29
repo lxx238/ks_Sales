@@ -153,6 +153,15 @@ def split_and_create_quotations(
     detail_sheet_products = []
     matched_inv_keys = set()
 
+    # 布板方式（BOM 的 layout）为工程权威来源，覆盖信息表朝向（横置き/縦置き）
+    if isinstance(matrix_data, dict):
+        for _bi in bom_info_by_key.values():
+            _bl = str((_bi.get('config') or {}).get('layout') or '').strip()
+            if _bl in ('横放', '横'):
+                matrix_data['layout'] = '横置き'; break
+            if _bl in ('竖放', '纵放', '竖', '纵'):
+                matrix_data['layout'] = '縦置き'; break
+
     master_wb = Workbook()
     default_sheet = master_wb.active
     master_wb.remove(default_sheet)

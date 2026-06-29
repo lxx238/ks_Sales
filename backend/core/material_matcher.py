@@ -752,7 +752,7 @@ def _determine_length_tier(length_mm):
     length_m = length_mm / 1000.0
     if length_m <= 1:
         return '0-1'
-    if length_m <= 3:
+    if length_m < 3:
         return '1-3'
     return '3+'
 
