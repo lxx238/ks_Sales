@@ -37,7 +37,7 @@ def center_images_in_column_d(excel_path, output_path=None):
     if output_path is None:
         output_path = excel_path
 
-    workbook = openpyxl.load_workbook(excel_path)
+    workbook = openpyxl.load_workbook(excel_path, rich_text=True)
     EMU_PER_PIXEL = 9525
     target_col = 4
 
@@ -84,7 +84,7 @@ def center_images_advanced(excel_path, output_path=None, scale_to_fit=True, max_
     if output_path is None:
         output_path = excel_path.replace('.xlsx', '_centered.xlsx')
 
-    workbook = openpyxl.load_workbook(excel_path)
+    workbook = openpyxl.load_workbook(excel_path, rich_text=True)
     EMU_PER_PIXEL = 9525
     target_col = 4
 

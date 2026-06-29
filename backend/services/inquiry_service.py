@@ -1328,7 +1328,7 @@ def build_case_price_workbook(project_name):
             mm = extract_length_from_spec(str(it.get('spec') or ''))
             if mm and mm > 0:
                 m = mm / 1000.0
-                len_tier = '0-1' if m <= 1 else ('1-3' if m < 3 else '3+')
+                len_tier = '0-1' if m < 1 else ('1-3' if m < 3 else '3+')
         code = str(it.get('material_code') or '').strip()
         ton_type = _ton_type_from_code(code, len_tier)
         key = f'{code}@@{len_tier}' if has_len else ton_type

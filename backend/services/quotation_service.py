@@ -446,6 +446,17 @@ def generate_quotation_db_only(data):
         temp_auto_matched = []
         temp_spec_mismatch = []
         temp_pricing_matched = []
+
+        # 日语/韩语区：案件内含「预装」料时，全部改用「铁托」吨价计价
+        if group in ('日语组', '韩语组') and all_products:
+            from backend.core.shared.product_utils import normalize_preinstall as _norm_pre
+            if any(_norm_pre(p.get('preinstall')) != '非预装' for p in all_products if p.get('preinstall')):
+                if steel_pack != 'tietuo':
+                    log_generate('案件含预装料，吨价包装自动切换为「铁托(tietuo)」')
+                    steel_pack = 'tietuo'
+                    if 'steel_pack' in ja_kwargs:
+                        ja_kwargs['steel_pack'] = 'tietuo'
+
         if confirmed_temp_codes:
             apply_confirmed_temp_codes(material_mapping, confirmed_temp_codes)
             log_generate(f'applied {len(confirmed_temp_codes)} confirmed temp codes')

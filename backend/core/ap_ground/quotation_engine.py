@@ -34,6 +34,8 @@ from decimal import Decimal
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.drawing.image import Image as XLImage
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.cell.text import InlineFont
 from backend.core.print_settings import apply_print_setup
 
 from backend.core.shared.bom_utils import resolve_products_and_array
@@ -77,15 +79,19 @@ if hasattr(sys.stdout, 'reconfigure'):
 CURRENCY_LABEL = 'USD'
 CURRENCY_FMT = '"$"#,##0.00'
 
-# 图片所在列：D（第 4 列），与 006 样例一致
-IMAGE_COL_INDEX = 4
+# 图片所在列：E（第 5 列）——Item No. 占 A-B 两列后顺移
+IMAGE_COL_INDEX = 5
 AP_GROUND_IMAGE_WIDTH = 372
 AP_GROUND_IMAGE_HEIGHT = 92
 
 # 备品比例：Total QTY × 1%
 SPARE_RATE = 0.01
 
-# BOM 明细表头（14 列，A~N）
+# Item No. 占两列（A-B 合并），其余列整体右移 1 列，故明细表共 15 列（A~O）
+COL_ITEM_NO_START = get_column_letter(1)    # A
+COL_ITEM_NO_END = get_column_letter(2)      # B
+
+# BOM 明细表头（15 列，A~O）：Item No. 占 A-B
 DETAIL_HEADERS = [
     'Item No.',
     'Product Name',
@@ -102,18 +108,37 @@ DETAIL_HEADERS = [
     'Discount Total price Of Spare Parts\n(USD) EXW',
     'Remark',
 ]
-MAX_COL = len(DETAIL_HEADERS)  # 14 (A~N)
+# 各数据列在表头中的逻辑序号（1-based，对应 DETAIL_HEADERS 列表下标+1）：
+# Item No.=1-2(合并), Product Name=3, Material=4, Picture=5, Spec.=6,
+# Unit Price=7, Discount Unit=8, QTY=9, Total QTY=10, Spare=11,
+# Total price=12, Discount Total=13, Discount Spare=14, Remark=15
+MAX_COL = 15  # A~O
 MAX_COL_LETTER = get_column_letter(MAX_COL)
 # 价格列字母（便于汇总页跨表引用）
-COL_UNIT_PRICE = get_column_letter(6)        # F 原价
-COL_DISC_UNIT = get_column_letter(7)         # G 折扣单价
-COL_QTY = get_column_letter(8)               # H 每基数量
-COL_TOTAL_QTY = get_column_letter(9)         # I 总数量
-COL_SPARE = get_column_letter(10)            # J 备品
-COL_TOTAL_PRICE = get_column_letter(11)      # K 每基原价合计
-COL_DISC_TOTAL = get_column_letter(12)       # L 每基折扣合计
-COL_DISC_SPARE = get_column_letter(13)       # M 备品折扣合计
-COL_REMARK = get_column_letter(14)           # N 备注(编码)
+COL_PRODUCT_NAME = get_column_letter(3)     # C
+COL_MATERIAL = get_column_letter(4)         # D
+COL_PICTURE = get_column_letter(5)          # E
+COL_SPEC = get_column_letter(6)             # F
+COL_UNIT_PRICE = get_column_letter(7)       # G 原价
+COL_DISC_UNIT = get_column_letter(8)        # H 折扣单价
+COL_QTY = get_column_letter(9)              # I 每基数量
+COL_TOTAL_QTY = get_column_letter(10)       # J 总数量
+COL_SPARE = get_column_letter(11)           # K 备品
+COL_TOTAL_PRICE = get_column_letter(12)     # L 每基原价合计
+COL_DISC_TOTAL = get_column_letter(13)      # M 每基折扣合计
+COL_DISC_SPARE = get_column_letter(14)      # N 备品折扣合计
+COL_REMARK = get_column_letter(15)          # O 备注(编码)
+# 抬头信息块各合并区右移 1 列后的起止列字母
+LOGO_MERGE = 'A2:C6'              # Logo 区（A 列窄边距 + B + C）
+CONTACT_MERGE_COL_START = 'D'     # 联系人/Array（D-E 合并）
+CONTACT_MERGE_COL_END = 'E'
+LABEL1_COL = 'F'                  # Installation Angle / Max Wind / ... 标签
+VALUE1_COL = 'G'                  # 对应值
+LABEL2_COL = 'H'                  # Panel Size / Power-PC / ... 标签
+VALUE2_COL_START = 'I'            # 值2（I-K 合并）
+VALUE2_COL_END = 'K'
+WARRANTY_COL_START = 'L'          # 质保（L-O 合并）
+WARRANTY_COL_END = MAX_COL_LETTER
 
 
 def _set_cell(ws, row, col, val, font=None, align=None, border=None,
@@ -381,22 +406,23 @@ def create_ap_ground_detail_sheet(
 
     thin = Side(style='thin', color='000000')
     thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    # 字体/颜色对齐 en_simple 明细表（Malgun Gothic，表头无填充黑字）
-    title_font = Font(name='Malgun Gothic', size=26, bold=True, color='000000')
-    info_font = Font(name='Malgun Gothic', size=14, color='000000')
-    info_bold = Font(name='Malgun Gothic', size=14, bold=True, color='000000')
-    header_font = Font(name='Malgun Gothic', size=14, bold=True, color='000000')
-    normal_font = Font(name='Malgun Gothic', size=14, color='000000')
-    bold_font = Font(name='Malgun Gothic', size=14, bold=True, color='000000')
+    # 字体/颜色统一 Arial（表头无填充黑字）
+    title_font = Font(name='Arial', size=26, bold=True, color='000000')
+    info_font = Font(name='Arial', size=14, color='000000')
+    info_bold = Font(name='Arial', size=14, bold=True, color='000000')
+    header_font = Font(name='Arial', size=14, bold=True, color='000000')
+    normal_font = Font(name='Arial', size=14, color='000000')
+    bold_font = Font(name='Arial', size=14, bold=True, color='000000')
     center = Alignment(horizontal='center', vertical='center', wrap_text=True)
     left_a = Alignment(horizontal='left', vertical='center', wrap_text=True)
     right_a = Alignment(horizontal='right', vertical='center', wrap_text=True)
 
     yellow_fill = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
 
-    # 列宽：A=12，B~N=25
-    ws.column_dimensions['A'].width = 12
-    for col in 'BCDEFGHIJKLMN':
+    # 列宽：A=1（窄边距），B=11（Item No. 右半），C~O=25
+    ws.column_dimensions['A'].width = 1
+    ws.column_dimensions['B'].width = 11
+    for col in 'CDEFGHIJKLMNO':
         ws.column_dimensions[col].width = 25
 
     # ---- 抬头：标题 ----
@@ -426,12 +452,12 @@ def create_ap_ground_detail_sheet(
     phone = contact_info.get('phone') or ''
     tel = contact_info.get('tel') or ''
 
-    # A2:B6 合并（Logo 区）
-    ws.merge_cells('A2:B6')
+    # A2:C6 合并（Logo 区，A 为窄边距）
+    ws.merge_cells(LOGO_MERGE)
     if image_path and os.path.exists(image_path):
         try:
             img = XLImage(img=image_path)
-            _tot_w_px = sum(float(ws.column_dimensions[c].width or 8.43) for c in ('A', 'B')) * 7.0
+            _tot_w_px = sum(float(ws.column_dimensions[c].width or 8.43) for c in ('A', 'B', 'C')) * 7.0
             _tot_h_px = sum(float(ws.row_dimensions[r].height or 20) for r in range(2, 7)) * 1.33
             _ow, _oh = img.width, img.height
             _ratio = _ow / _oh
@@ -448,65 +474,61 @@ def create_ap_ground_detail_sheet(
     def _h(r, c, val, font=None):
         _set_cell(ws, r, c, val, font=font or info_font, align=center, border=thin_border)
 
-    # C-D 合并：联系人 + Array
+    # 联系人 + Array（D-E 合并）
+    _contact_start = 4  # D
     def _contact(r, val, font=None):
-        ws.merge_cells(f'C{r}:D{r}')
-        _h(r, 3, val, font=font)
+        ws.merge_cells(f'{CONTACT_MERGE_COL_START}{r}:{CONTACT_MERGE_COL_END}{r}')
+        _h(r, _contact_start, val, font=font)
 
     _contact(2, f'Sales:{contact_name}' if contact_name else '')
     _contact(3, f'Mob: {phone}' if phone else '')
     _contact(4, f'Tel: {tel}' if tel else '')
     _contact(6, 'Array', font=info_bold)
 
-    # E / F 列：标签1 + 值1（行2-5），Array 行号(段)/列号(列)
-    _h(2, 5, 'Installation Angle', font=info_bold)
-    _h(2, 6, angle_display)
-    _h(3, 5, 'Max Wind Load ', font=info_bold)
-    _h(3, 6, str(wind))
-    _h(4, 5, 'Max Snow Load ', font=info_bold)
-    _h(4, 6, str(snow))
-    _h(5, 5, 'Span(S/N)', font=info_bold)
-    _h(5, 6, str(span_sn))
+    # F / G 列：标签1 + 值1（行2-5），Array 行号(段)/列号(列)
+    _h(2, 6, 'Installation Angle', font=info_bold)
+    _h(2, 7, angle_display)
+    _h(3, 6, 'Max Wind Load ', font=info_bold)
+    _h(3, 7, str(wind))
+    _h(4, 6, 'Max Snow Load ', font=info_bold)
+    _h(4, 7, str(snow))
+    _h(5, 6, 'Span(S/N)', font=info_bold)
+    _h(5, 7, str(span_sn))
     if rows:
-        _h(6, 5, f'{rows}段')
+        _h(6, 6, f'{rows} rows')
     if cols:
-        _h(6, 6, f'{cols}列')
+        _h(6, 7, f'{cols} Columns')
 
-    # G 列：标签2（行2-5） + Array 台数(table)
-    _h(2, 7, 'Panel Size', font=info_bold)
-    _h(3, 7, 'Power/PC', font=info_bold)
-    _h(4, 7, 'Watt(W)/Table', font=info_bold)
-    _h(5, 7, 'Span(E/W)', font=info_bold)
+    # H 列：标签2（行2-5） + Array 台数(table)
+    _h(2, 8, 'Panel Size', font=info_bold)
+    _h(3, 8, 'Power/PC', font=info_bold)
+    _h(4, 8, 'Watt(W)/Table', font=info_bold)
+    _h(5, 8, 'Span(E/W)', font=info_bold)
     if tables:
-        _h(6, 7, f'{tables} table')
+        _h(6, 8, f'{tables} table')
 
-    # H-J 合并：值2（行2-5）
+    # I-K 合并：值2（行2-5）
+    _val2_start = 9  # I
     def _hj(r, val):
-        ws.merge_cells(f'H{r}:J{r}')
-        _h(r, 8, val)
+        ws.merge_cells(f'{VALUE2_COL_START}{r}:{VALUE2_COL_END}{r}')
+        _h(r, _val2_start, val)
 
     _hj(2, f'{panel_size} mm' if panel_size else '')
     _hj(3, f'{power_pc} WP' if power_pc else '')
     _hj(4, f'{watt_per_table} WP' if watt_per_table != '' else '')
     _hj(5, f'{span_ew} mm' if span_ew else '')
 
-    # 质保（K:N 合并 K2:N6）
-    ws.merge_cells(f'K2:{MAX_COL_LETTER}6')
-    _set_cell(ws, 2, 11, '10 years warranty \n20 years service life', font=info_font,
+    # 质保（L:O 合并 L2:O6）
+    ws.merge_cells(f'{WARRANTY_COL_START}2:{WARRANTY_COL_END}6')
+    _set_cell(ws, 2, 12, '10 years warranty \n20 years service life', font=info_font,
               align=center, border=thin_border)
 
     # 抬头网格所有单元格补齐边框（含合并区与非数据格）
+    # 注意：合并单元格的边框必须对每个构成单元格都强制设置才能形成完整外框，
+    #       不能用 cell.border == Border() 这类条件判断（对 MergedCell 会失效）。
     for _r in range(2, 7):
         for _c in range(1, MAX_COL + 1):
-            cell = ws.cell(row=_r, column=_c)
-            if cell.border is None or cell.border == Border():
-                cell.border = thin_border
-            else:
-                ex = cell.border
-                cell.border = Border(
-                    left=ex.left or thin, right=ex.right or thin,
-                    top=ex.top or thin, bottom=ex.bottom or thin,
-                )
+            ws.cell(row=_r, column=_c).border = thin_border
 
     for _r in range(2, 7):
         ws.row_dimensions[_r].height = 20
@@ -515,10 +537,28 @@ def create_ap_ground_detail_sheet(
 
     # ---- BOM 表头（行 8）----
     header_row = 8
-    ws.row_dimensions[header_row].height = 46
+    ws.row_dimensions[header_row].height = 67
+    _hdr_black = InlineFont(rFont='Arial', sz=14, b=True, color='000000')
+    _hdr_red = InlineFont(rFont='Arial', sz=14, b=True, color='FFFF0000')
+    import re as _re_hdr
+    # Item No. 占 A-B 两列（合并），其余表头从 C 列开始
+    ws.merge_cells(f'{COL_ITEM_NO_START}{header_row}:{COL_ITEM_NO_END}{header_row}')
     for ci, label in enumerate(DETAIL_HEADERS):
-        _set_cell(ws, header_row, ci + 1, label, font=header_font, align=center,
-                  border=thin_border)
+        if ci == 0:
+            col = 1  # Item No. -> A（合并 A-B）
+        else:
+            col = ci + 2  # 其余顺移 +1
+        if 'EXW' in label or 'Discount' in label:
+            blocks = []
+            for seg in _re_hdr.split(r'(EXW|Discount)', label):
+                if seg == '':
+                    continue
+                blocks.append(TextBlock(_hdr_red if seg in ('EXW', 'Discount') else _hdr_black, seg))
+            _set_cell(ws, header_row, col, CellRichText(blocks), font=header_font,
+                      align=center, border=thin_border)
+        else:
+            _set_cell(ws, header_row, col, label, font=header_font, align=center,
+                      border=thin_border)
 
     # ---- BOM 数据（行 9+）----
     data_start = 9
@@ -552,45 +592,47 @@ def create_ap_ground_detail_sheet(
         for c in range(1, MAX_COL + 1):
             _set_cell(ws, row, c, None, font=normal_font, align=center, border=thin_border)
 
+        # Item No. 占 A-B 两列（合并）
+        ws.merge_cells(f'A{row}:B{row}')
         _set_cell(ws, row, 1, idx + 1, font=normal_font, align=center, border=thin_border)
-        _set_cell(ws, row, 2, item['name'], font=normal_font, align=center, border=thin_border)
-        _set_cell(ws, row, 3, item['material'], font=normal_font, align=center, border=thin_border)
-        _set_cell(ws, row, 4, '', font=normal_font, align=center, border=thin_border)  # Picture
-        _set_cell(ws, row, 5, _strip_cjk_spec(item['spec']), font=normal_font, align=center, border=thin_border)
+        _set_cell(ws, row, 3, item['name'], font=normal_font, align=center, border=thin_border)
+        _set_cell(ws, row, 4, item['material'], font=normal_font, align=center, border=thin_border)
+        _set_cell(ws, row, 5, '', font=normal_font, align=center, border=thin_border)  # Picture
+        _set_cell(ws, row, 6, _strip_cjk_spec(item['spec']), font=normal_font, align=center, border=thin_border)
 
-        # F 原价（长度折算、未折扣）
+        # G 原价（长度折算、未折扣）
         if is_matched and unit_price > 0:
-            _set_cell(ws, row, 6, round(unit_price, 6), font=normal_font, align=center,
+            _set_cell(ws, row, 7, round(unit_price, 6), font=normal_font, align=center,
                       border=thin_border, number_format=CURRENCY_FMT)
-            # G 折扣单价 = F × rate/100
-            _set_cell(ws, row, 7, f'=F{row}*{discount_rate}/100', font=normal_font, align=center,
+            # H 折扣单价 = G × rate/100
+            _set_cell(ws, row, 8, f'=G{row}*{discount_rate}/100', font=normal_font, align=center,
                       border=thin_border, number_format=CURRENCY_FMT)
             per_table_disc_total += (Decimal(str(unit_price)) * Decimal(str(discount_rate)) / Decimal('100')
                                      * Decimal(str(qty_per_table)))
         else:
-            _set_cell(ws, row, 6, '', font=normal_font, align=center, border=thin_border, number_format=CURRENCY_FMT)
             _set_cell(ws, row, 7, '', font=normal_font, align=center, border=thin_border, number_format=CURRENCY_FMT)
+            _set_cell(ws, row, 8, '', font=normal_font, align=center, border=thin_border, number_format=CURRENCY_FMT)
 
-        # H 每基数量
+        # I 每基数量
         qty_disp = int(qty_per_table) if float(qty_per_table).is_integer() else qty_per_table
-        _set_cell(ws, row, 8, qty_disp, font=normal_font, align=center, border=thin_border)
-        # I 总数量 = H × tables
-        _set_cell(ws, row, 9, f'=H{row}*{tables}', font=normal_font, align=center,
+        _set_cell(ws, row, 9, qty_disp, font=normal_font, align=center, border=thin_border)
+        # J 总数量 = I × tables
+        _set_cell(ws, row, 10, f'=I{row}*{tables}', font=normal_font, align=center,
                   border=thin_border, number_format='#,##0')
-        # J 备品 = I × 1%
-        _set_cell(ws, row, 10, f'=I{row}*{SPARE_RATE}', font=normal_font, align=center,
+        # K 备品 = J × 1%
+        _set_cell(ws, row, 11, f'=J{row}*{SPARE_RATE}', font=normal_font, align=center,
                   border=thin_border, number_format='#,##0.000')
-        # K 每基原价合计 = F × H
-        _set_cell(ws, row, 11, f'=N(F{row})*H{row}', font=normal_font, align=center,
+        # L 每基原价合计 = G × I
+        _set_cell(ws, row, 12, f'=N(G{row})*I{row}', font=normal_font, align=center,
                   border=thin_border, number_format=CURRENCY_FMT)
-        # L 每基折扣合计 = G × H
-        _set_cell(ws, row, 12, f'=N(G{row})*H{row}', font=normal_font, align=center,
+        # M 每基折扣合计 = H × I
+        _set_cell(ws, row, 13, f'=N(H{row})*I{row}', font=normal_font, align=center,
                   border=thin_border, number_format=CURRENCY_FMT)
-        # M 备品折扣合计 = G × J
-        _set_cell(ws, row, 13, f'=N(G{row})*J{row}', font=normal_font, align=center,
+        # N 备品折扣合计 = H × K
+        _set_cell(ws, row, 14, f'=N(H{row})*K{row}', font=normal_font, align=center,
                   border=thin_border, number_format=CURRENCY_FMT)
-        # N 备注(编码)
-        _set_cell(ws, row, 14, code, font=normal_font, align=center, border=thin_border)
+        # O 备注(编码)
+        _set_cell(ws, row, 15, code, font=normal_font, align=center, border=thin_border)
 
         row_code_map[row] = code
         if not is_matched:
@@ -599,8 +641,8 @@ def create_ap_ground_detail_sheet(
 
     data_end = data_start + len(items) - 1 if items else data_start - 1
 
-    # ---- 隐藏 I / J / M 列 ----
-    for _hc in ('I', 'J', 'M'):
+    # ---- 隐藏 J / K / N 列（Total QTY / Spare / 备品折扣合计）----
+    for _hc in ('J', 'K', 'N'):
         ws.column_dimensions[_hc].hidden = True
 
     # ---- 末尾合计行 ----
@@ -609,34 +651,37 @@ def create_ap_ground_detail_sheet(
     alt_note_row = data_end + 3
     has_data = bool(items) and data_end >= data_start
 
-    def _total_row(r, label, multiplier=None):
-        ws.merge_cells(f'A{r}:J{r}')
+    def _total_row(r, label, multiplier=None, amount_font=None):
+        amt_font = amount_font or bold_font
+        ws.merge_cells(f'A{r}:K{r}')
         _set_cell(ws, r, 1, label, font=bold_font, align=right_a, border=thin_border)
-        for ci in range(2, 11):
+        for ci in range(2, 12):
             ws.cell(row=r, column=ci).border = thin_border
-        # K 列（原价合计）、L 列（折扣合计）
+        # L 列（原价合计）、M 列（折扣合计）
         if has_data:
-            k_expr = f'SUM(K{data_start}:K{data_end})'
-            l_expr = f'SUM(L{data_start}:L{data_end})'
+            k_expr = f'SUM(L{data_start}:L{data_end})'
+            l_expr = f'SUM(M{data_start}:M{data_end})'
             if multiplier:
                 k_expr = f'{k_expr}*{multiplier}'
                 l_expr = f'{l_expr}*{multiplier}'
-            _set_cell(ws, r, 11, f'={k_expr}', font=bold_font, align=center,
+            _set_cell(ws, r, 12, f'={k_expr}', font=amt_font, align=center,
                       border=thin_border, number_format=CURRENCY_FMT)
-            _set_cell(ws, r, 12, f'={l_expr}', font=bold_font, align=center,
+            _set_cell(ws, r, 13, f'={l_expr}', font=amt_font, align=center,
                       border=thin_border, number_format=CURRENCY_FMT)
-        for ci in (9, 10, 13, 14):
+        for ci in (10, 11, 14, 15):
             ws.cell(row=r, column=ci).border = thin_border
         ws.row_dimensions[r].height = 24
 
     _total_row(total_table_row, 'TOTAL AMOUNT/TABLE')
-    _total_row(total_all_row, 'TOTAL AMOUNT OF ALL TABLE', multiplier=tables)
+    _red_bold = Font(name='Arial', size=14, bold=True, color='FFFF0000')
+    _total_row(total_all_row, 'TOTAL AMOUNT OF ALL TABLE', multiplier=tables, amount_font=_red_bold)
 
     # 备选产品提示行（外框之外）
-    ws.merge_cells(f'A{alt_note_row}:N{alt_note_row}')
+    _red_info = Font(name='Arial', size=14, color='FFFF0000')
+    ws.merge_cells(f'A{alt_note_row}:O{alt_note_row}')
     _set_cell(ws, alt_note_row, 1,
               'The following products are alternative, please let me know if you need them.',
-              font=info_font, align=left_a)
+              font=_red_info, align=left_a)
     ws.row_dimensions[alt_note_row].height = 24
 
     # ---- 图片插入（D 列）----
