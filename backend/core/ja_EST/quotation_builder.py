@@ -83,6 +83,7 @@ _HEADER_FIELD_MAP = {
     '数量': ['数量', 'Qty.', 'Quantity'],
     '单重': ['单重', 'Weight', '重量'],
     '备注': ['备注', 'Remark', 'Notes'],
+    '预装': ['预装', '预装情况'],
 }
 
 
@@ -271,6 +272,7 @@ def _extract_products_zip(parsed_rows, header_row, end_row, col_mapping):
         spec = str(cells.get(col_mapping.get('规格', -1), '')).strip()
         material = str(cells.get(col_mapping.get('材质', -1), '')).strip()
         remark = str(cells.get(col_mapping.get('备注', -1), '')).strip()
+        preinstall = str(cells.get(col_mapping.get('预装', -1), '')).strip()
         qty_raw = cells.get(col_mapping.get('数量', -1), '')
         qty_clean = re.sub(r'[^0-9.\-]', '', str(qty_raw))
         quantity = _safe_float(qty_clean, 0)
@@ -288,6 +290,7 @@ def _extract_products_zip(parsed_rows, header_row, end_row, col_mapping):
         products.append({
             'seq': seq, 'code': code, 'name': name, 'spec': spec,
             'material': material, 'quantity': quantity, 'remark': remark,
+            'preinstall': preinstall,
             'weight': weight_decimal, 'weight_has_unit': weight_has_unit,
             'weight_unit': weight_unit, '_source_row': rn,
         })

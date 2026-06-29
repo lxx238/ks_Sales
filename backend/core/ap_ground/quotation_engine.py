@@ -486,13 +486,13 @@ def create_ap_ground_detail_sheet(
     _contact(6, 'Array', font=info_bold)
 
     # F / G 列：标签1 + 值1（行2-5），Array 行号(段)/列号(列)
-    _h(2, 6, 'Installation Angle', font=info_bold)
+    _h(2, 6, 'Installation Angle')
     _h(2, 7, angle_display)
-    _h(3, 6, 'Max Wind Load ', font=info_bold)
+    _h(3, 6, 'Max Wind Load ')
     _h(3, 7, str(wind))
-    _h(4, 6, 'Max Snow Load ', font=info_bold)
+    _h(4, 6, 'Max Snow Load ')
     _h(4, 7, str(snow))
-    _h(5, 6, 'Span(S/N)', font=info_bold)
+    _h(5, 6, 'Span(S/N)')
     _h(5, 7, str(span_sn))
     if rows:
         _h(6, 6, f'{rows} rows')
@@ -500,10 +500,10 @@ def create_ap_ground_detail_sheet(
         _h(6, 7, f'{cols} Columns')
 
     # H 列：标签2（行2-5） + Array 台数(table)
-    _h(2, 8, 'Panel Size', font=info_bold)
-    _h(3, 8, 'Power/PC', font=info_bold)
-    _h(4, 8, 'Watt(W)/Table', font=info_bold)
-    _h(5, 8, 'Span(E/W)', font=info_bold)
+    _h(2, 8, 'Panel Size')
+    _h(3, 8, 'Power/PC')
+    _h(4, 8, 'Watt(W)/Table')
+    _h(5, 8, 'Span(E/W)')
     if tables:
         _h(6, 8, f'{tables} table')
 
@@ -1086,8 +1086,9 @@ def create_ap_ground_summary_sheet(
 
         p2_note = p2_total + 2
         ws.merge_cells(f'A{p2_note}:M{p2_note}')
+        _red_note_font = Font(name='Arial', size=11, color='FFFF0000')
         _set_cell(ws, p2_note, 1, 'Please kindly check the detailed prices of components in the following sheet',
-                  font=info_font, align=left_a)
+                  font=_red_note_font, align=left_a)
 
     # ---- 汇总表外边缘框（Part1 标题 ~ 末行，A~M）----
     _apply_outer_frame(ws, part1_start, frame_bottom, 1, 13)
