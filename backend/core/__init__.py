@@ -3,7 +3,11 @@ from .material_matcher import build_bom_material_context, fetch_material_mapping
 from .price_matcher import has_valid_price_info, load_price_mapping, resolve_price_info
 
 
-def extract_matrix_data(matrix_file, group=None):
+def extract_matrix_data(matrix_file, group=None, ap_case_type=None):
+    # 亚太组地面案件信息表为 KSENG 英文「Project information」，复用 en_simple 解析器
+    if group == '亚太组' and str(ap_case_type or '').upper() == 'GROUND':
+        from backend.core.en_simple.matrix_parser import extract_matrix_data as en_extract
+        return en_extract(matrix_file)
     if group == '日语组':
         from backend.core.ja_EST.matrix_parser import extract_matrix_data as ja_extract
         try:
@@ -23,7 +27,8 @@ def split_and_create_quotations(*args, **kwargs):
     case_type = kwargs.get('case_type', 'EST')
     ko_case_type = kwargs.get('ko_case_type', 'NORMAL')
     en_case_type = kwargs.get('en_case_type', 'SIMPLE')
-    print(f'[ROUTE] group={group}, en_case_type={en_case_type}, pre_parsed_products={bool(kwargs.get("pre_parsed_products"))}, arrays={len((kwargs.get("matrix_data") or {}).get("arrays") or [])}')
+    ap_case_type = kwargs.get('ap_case_type')
+    print(f'[ROUTE] group={group}, en_case_type={en_case_type}, ap_case_type={ap_case_type}, pre_parsed_products={bool(kwargs.get("pre_parsed_products"))}, arrays={len((kwargs.get("matrix_data") or {}).get("arrays") or [])}')
     if group == '日语组' and case_type == 'NV':
         from backend.core.ja_nv.quotation_builder import split_and_create_quotations as nv_split
         return nv_split(*args, **kwargs)
@@ -48,6 +53,9 @@ def split_and_create_quotations(*args, **kwargs):
     if group == '韩语组' and ko_case_type == 'NORMAL':
         from backend.core.ko_normal.quotation_builder import split_and_create_quotations as ko_split
         return ko_split(*args, **kwargs)
+    if group == '亚太组' and str(ap_case_type or '').upper() == 'GROUND':
+        from backend.core.ap_ground.quotation_builder import split_and_create_quotations as ap_ground_split
+        return ap_ground_split(*args, **kwargs)
     if group == '亚太组':
         from backend.core.ap_common.quotation_builder import split_and_create_quotations as ap_split
         return ap_split(*args, **kwargs)

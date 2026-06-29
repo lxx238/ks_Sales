@@ -342,7 +342,7 @@ def _filter_image_needed_codes(products, material_mapping):
     return list(needed_codes)
 
 
-def build_bom_material_context(bom_file, selected_bom_keys=None, group=None, sale_type='export', coating_thickness=10, load_images=True, lazy_image_filter=False):
+def build_bom_material_context(bom_file, selected_bom_keys=None, group=None, sale_type='export', coating_thickness=10, load_images=True, lazy_image_filter=False, module_wattage=None):
     if load_images and not lazy_image_filter:
         cached_context = get_cached_bom_material_context(bom_file, selected_bom_keys=selected_bom_keys, group=group)
         if cached_context is not None:
@@ -701,6 +701,12 @@ def fetch_temp_code_fallback(products, material_mapping, group=None, sale_type='
                     final_price,
                     mr['item'].get('preinstall') or matched_entry.get('preinstall') or '预装',
                     group=group, sale_type=sale_type,
+                    price_info={
+                        'ton_price_rmb': matched_entry.get('unit_price_rmb'),
+                        'exchange_rate': None,
+                        'points': None,
+                        'rate_category': '',
+                    },
                 ),
             })
         elif partial_matches:
@@ -761,13 +767,76 @@ def _determine_ton_tier(total_weight_ton):
 
 _METER_UNITS = {'米', 'm', 'M', 'meter', 'Meter', 'METERS', 'meters'}
 
-_TON_SIDE_KEYS = {'ext': 'external', 'int': 'internal'}
+
+def _fetch_temp_material_attrs(material_codes):
+    """查询吨价底表(temp_material_pricing)中的单重/单位/定价属性。
+
+    返回 {norm_code: {'unit_weight','unit','pricing_attr','code_attr'}, ...}。
+    """
+    from backend.repositories.material_repository import fetch_material_rows
+
+    norms = [normalize_lookup_code(str(c or '')) for c in (material_codes or [])]
+    norms = list(dict.fromkeys(n for n in norms if n))
+    if not norms:
+        return {}
+
+    conn = get_db_connection()
+    try:
+        existing = {r[1] for r in conn.execute('PRAGMA table_info(temp_material_pricing)').fetchall()}
+        weight_cols = [c for c in ('单重', '米重/km', '参考重量', '重量') if c in existing]
+        if not weight_cols:
+            return {}
+        sel_cols = ['工程编码', '计价单位', '定价属性'] + weight_cols
+        col_sql = ', '.join(f'"{c}"' for c in dict.fromkeys(sel_cols))
+        placeholders = ', '.join(['?'] * len(norms))
+        rows = conn.execute(
+            f'SELECT {col_sql} FROM temp_material_pricing '
+            f'WHERE UPPER(REPLACE(TRIM("工程编码"), \' \', \'\')) IN ({placeholders})',
+            norms,
+        ).fetchall()
+    except Exception as exc:
+        log_match(f'temp material attrs lookup failed: {exc}')
+        return {}
+    finally:
+        conn.close()
+
+    attrs = {}
+    for row in rows:
+        d = dict(row)
+        n = normalize_lookup_code(str(d.get('工程编码') or ''))
+        if not n:
+            continue
+        uw = 0.0
+        for col in weight_cols:
+            raw = d.get(col)
+            if raw is None or str(raw).strip() in ('', '暂无数据'):
+                continue
+            try:
+                v = float(str(raw).replace(',', '').strip())
+                if v > 0:
+                    uw = v
+                    break
+            except (TypeError, ValueError):
+                continue
+        attrs[n] = {
+            'unit_weight': uw,
+            'unit': str(d.get('计价单位') or '').strip(),
+            'pricing_attr': str(d.get('定价属性') or '').strip(),
+            'code_attr': '',
+        }
+    return attrs
 
 
 def fetch_temp_material_pricing_fallback(products, material_mapping, group=None, sale_type='export', pack=None):
     from backend.core.shared.weight_utils import extract_length_from_spec
+    from backend.core.shared.ton_price_utils import (
+        build_ton_price_info_for_products,
+        _determine_length_tier,
+        _weight_tier_key,
+        _WEIGHT_TIER_DISPLAY,
+        _determine_pricing_currency,
+    )
 
-    # 包装类型（碳钢按简易包装/铁托区分吨价），默认简易包装
     pack = pack if pack in ('jybz', 'tietuo') else 'jybz'
 
     unmatched_products = []
@@ -812,44 +881,23 @@ def fetch_temp_material_pricing_fallback(products, material_mapping, group=None,
     if not unmatched_products:
         return [], []
 
-    conn = get_db_connection()
-    try:
-        all_codes = list({item['normalized'] for item in unmatched_products})
-        placeholders = ','.join('?' for _ in all_codes)
-        rows = conn.execute(
-            f'SELECT * FROM temp_material_pricing '
-            f'WHERE "工程编码" IN ({placeholders})',
-            all_codes
-        ).fetchall()
-    finally:
-        conn.close()
-
-    if not rows:
+    all_unmatched_codes = list({item['normalized'] for item in unmatched_products})
+    material_attrs = _fetch_temp_material_attrs(all_unmatched_codes)
+    if not material_attrs:
         return [], []
 
-    code_products_map = {}
-    for product in products:
-        code = str(product.get('code') or '').strip()
-        if not code:
-            continue
-        normalized = normalize_lookup_code(code)
-        if not normalized:
-            continue
-        if normalized not in code_products_map:
-            code_products_map[normalized] = []
-        code_products_map[normalized].append(product)
+    records, code_products_map = build_ton_price_info_for_products(
+        products=products,
+        material_attrs=material_attrs,
+        group=group,
+        sale_type=sale_type,
+        pack=pack,
+    )
 
-    temp_rows = {}
-    for row in rows:
-        d = dict(row)
-        raw_code = str(d.get('工程编码') or '').strip()
-        n_code = normalize_lookup_code(raw_code)
-        if n_code:
-            temp_rows[n_code] = d
-        if raw_code:
-            temp_rows[raw_code] = d
+    if not records:
+        return [], []
 
-    currency = _determine_temp_pricing_currency(group=group, sale_type=sale_type)
+    currency = _determine_pricing_currency(group=group, sale_type=sale_type)
     auto_matched = []
     not_found = []
 
@@ -858,24 +906,59 @@ def fetch_temp_material_pricing_fallback(products, material_mapping, group=None,
         normalized = item['normalized']
         bom_spec = item['spec']
 
-        temp_row = temp_rows.get(normalized) or temp_rows.get(code)
-        if not temp_row:
+        record = records.get(normalized)
+        if not record:
             not_found.append(item)
             continue
 
-        unit_weight_raw = temp_row.get('单重')
-        try:
-            unit_weight = float(unit_weight_raw) if unit_weight_raw is not None else 0.0
-        except (TypeError, ValueError):
-            unit_weight = 0.0
-        if unit_weight <= 0:
-            not_found.append(item)
-            continue
+        existing = material_mapping.get(normalized) or material_mapping.get(code)
+        prev_spec_prices = existing.get('_spec_prices', {}) if existing and isinstance(existing, dict) else {}
+        norm_spec = _normalize_spec_for_compare(bom_spec)
 
-        pricing_unit = str(temp_row.get('计价单位') or '').strip()
+        db_name = (existing.get('name') or '') if existing else ''
+        db_name_ko = (existing.get('name_ko') or '') if existing else ''
+        db_name_en = (existing.get('name_en') or '') if existing else ''
+        db_name_ja = (existing.get('name_ja') or '') if existing else ''
+
+        record['name'] = db_name or record.get('name') or item.get('name', '')
+        record['name_ko'] = db_name_ko or record.get('name_ko', '')
+        record['name_en'] = db_name_en or record.get('name_en', '')
+        record['name_fr'] = (existing.get('name_fr') or '') if existing else ''
+        record['name_es'] = (existing.get('name_es') or '') if existing else ''
+        record['name_zh'] = (existing.get('name_zh') or '') if existing else ''
+        record['name_ja'] = db_name_ja or record.get('name_ja', '')
+        record['db_material'] = (existing.get('db_material') or '') if existing else ''
+        if norm_spec not in record.get('_spec_prices', {}):
+            record['_spec_prices'] = {
+                **prev_spec_prices,
+                norm_spec: {
+                    'price': record['price'],
+                    'unit': record['unit'],
+                    'temp_inquiry': True,
+                },
+            }
+
+        material_mapping[normalized] = record
+        if code:
+            material_mapping[code] = record
+
+        pricing_unit = record.get('unit', '')
         is_meter = pricing_unit in _METER_UNITS
+        # 吨价模型 compute_ton_price_record 已按规格折算为每件单价，不再二次折算
+        # 米计价物料按本行规格从 _spec_prices 取对应单价
+        display_price = record['price']
+        if is_meter:
+            _spec_entry = (record.get('_spec_prices') or {}).get(norm_spec)
+            if _spec_entry and _spec_entry.get('price') is not None:
+                display_price = _spec_entry['price']
+
+        _pre = item.get('preinstall') or '预装'
 
         all_prods_for_code = code_products_map.get(normalized, [])
+        unit_weight = record.get('db_weight') or 0.0
+        # 构造本行规格对应的 price_info（携带该规格的人民币底价），用于预装金额计算
+        _cur_spec_entry = (record.get('_spec_prices') or {}).get(norm_spec) or {}
+        spec_price_info = {**record, **_cur_spec_entry} if _cur_spec_entry else record
         total_weight_kg = 0.0
         for p in all_prods_for_code:
             qty = p.get('quantity', 0)
@@ -887,76 +970,10 @@ def fetch_temp_material_pricing_fallback(products, material_mapping, group=None,
                     total_weight_kg += unit_weight * (p_len_mm / 1000.0) * qty
             else:
                 total_weight_kg += unit_weight * qty
-
         total_weight_ton = total_weight_kg / 1000.0
-        ton_tier = _determine_ton_tier(total_weight_ton)
-        side = 'external' if total_weight_ton >= 50 else 'internal'
-
+        ton_tier = _WEIGHT_TIER_DISPLAY.get(_weight_tier_key(total_weight_kg), '50+')
         length_mm = extract_length_from_spec(bom_spec)
         length_tier = _determine_length_tier(length_mm)
-
-        col_name = f'{side}_{ton_tier}_{length_tier}_{currency}_{pack}'
-        price_val = temp_row.get(col_name)
-        try:
-            price = float(price_val) if price_val is not None else 0.0
-        except (TypeError, ValueError):
-            price = 0.0
-
-        if price <= 0:
-            not_found.append(item)
-            continue
-
-        norm_spec = _normalize_spec_for_compare(bom_spec)
-        existing = material_mapping.get(normalized) or material_mapping.get(code)
-        prev_spec_prices = existing.get('_spec_prices', {}) if existing and isinstance(existing, dict) else {}
-
-        temp_name = str(temp_row.get('工程品名') or '').strip()
-        db_name = (existing.get('name') or '') if existing else ''
-        db_name_ko = (existing.get('name_ko') or '') if existing else ''
-        db_name_en = (existing.get('name_en') or '') if existing else ''
-        db_name_ja = (existing.get('name_ja') or '') if existing else ''
-
-        record = {
-            'db_code': code,
-            'name': db_name or temp_name or item.get('name', ''),
-            'name_ko': db_name_ko,
-            'name_en': db_name_en,
-            'name_fr': '',
-            'name_es': '',
-            'name_zh': '',
-            'name_ja': db_name_ja,
-            'unit': pricing_unit,
-            'price': price,
-            'code_attribute': str(temp_row.get('定价属性') or '').strip(),
-            'pricing_attribute': str(temp_row.get('定价属性') or '').strip(),
-            'attribute': (existing.get('attribute') or '') if existing else '',
-            'db_weight': unit_weight if not is_meter else None,
-            'db_material': (existing.get('db_material') or '') if existing else '',
-            'image_status': 'none',
-            'image_bytes': None,
-            'image_ext': None,
-            'issue_reason': None,
-            'source': 'temp_material_pricing',
-            'temp_inquiry': True,
-            '_spec_prices': {
-                **prev_spec_prices,
-                norm_spec: {
-                    'price': price,
-                    'unit': pricing_unit,
-                    'temp_inquiry': True,
-                },
-            },
-        }
-        material_mapping[normalized] = record
-        if code:
-            material_mapping[code] = record
-
-        display_price = price
-        if is_meter:
-            _disp_len_mm = extract_length_from_spec(bom_spec) or 0
-            if _disp_len_mm and _disp_len_mm > 0:
-                display_price = price * _disp_len_mm / 1000.0
-        _pre = item.get('preinstall') or '预装'
 
         auto_matched.append({
             'code': code,
@@ -968,13 +985,14 @@ def fetch_temp_material_pricing_fallback(products, material_mapping, group=None,
             'total_weight_ton': round(total_weight_ton, 3),
             'ton_tier': ton_tier,
             'length_tier': length_tier,
-            'side': side,
+            'side': 'internal',
             'currency': currency,
-            'col_name': col_name,
+            'col_name': record.get('rate_category', ''),
             'preinstall': _pre,
             'adjusted_price': _compute_adjusted_price(
                 display_price, _pre,
                 group=group, sale_type=sale_type,
+                price_info=spec_price_info,
             ),
         })
 
@@ -1042,19 +1060,51 @@ def apply_confirmed_temp_codes(material_mapping, confirmed_temp_codes):
             material_mapping[code] = record
 
 
-def _compute_adjusted_price(base_price, preinstall, group=None, sale_type='export'):
+def _compute_adjusted_price(base_price, preinstall, group=None, sale_type='export', price_info=None):
     """供临时询价匹配结果展示用：按预装公式算出「预装情况对应金额」。
 
-    与 price_utils.get_temp_adjusted_base_price 口径一致，独立实现以避免循环导入。
+    优先使用 price_info 中的人民币底价(ton_price_rmb)、汇率、点数、类别
+    进行精确计算，与 apply_temp_preinstall_adjustment 口径一致；
+    缺少人民币底价时回退到 base_price 旧口径(+1 / ×1.1)。
     """
-    from backend.core.shared.price_utils import _temp_pricing_currency
     try:
         base = float(base_price)
     except (TypeError, ValueError):
         return None
-    if _temp_pricing_currency(group, sale_type) in ('rmb', 'rmb_fx'):
-        return base
+
+    rmb_base = None
+    exchange_rate = None
+    points = None
+    rate_category = ''
+    if price_info:
+        try:
+            rmb_base = float(price_info.get('ton_price_rmb')) if price_info.get('ton_price_rmb') not in (None, '') else None
+        except (TypeError, ValueError):
+            rmb_base = None
+        try:
+            exchange_rate = float(price_info.get('exchange_rate')) if price_info.get('exchange_rate') not in (None, '') else None
+        except (TypeError, ValueError):
+            exchange_rate = None
+        try:
+            points = float(price_info.get('points')) if price_info.get('points') not in (None, '') else None
+        except (TypeError, ValueError):
+            points = None
+        rate_category = str(price_info.get('rate_category') or '').strip()
+
+    is_domestic = sale_type == 'domestic' or (group == '韩语组' and sale_type == 'domestic')
+
     pre = normalize_preinstall(preinstall)
     if pre == '非预装':
+        if rmb_base is not None and exchange_rate and points:
+            adjusted_rmb = rmb_base * 1.1
+            if rate_category == 'dizhuang':
+                return round(adjusted_rmb / exchange_rate, 6)
+            return round(adjusted_rmb / exchange_rate / points, 6)
         return round(base * 1.1, 6)
+
+    if rmb_base is not None and exchange_rate and points:
+        adjusted_rmb = rmb_base + 1
+        if rate_category == 'dizhuang':
+            return round(adjusted_rmb / exchange_rate, 6)
+        return round(adjusted_rmb / exchange_rate / points, 6)
     return round(base + 1, 6)

@@ -269,6 +269,60 @@ def _extract_angle(df):
 def _extract_layout(df):
     if df.shape[0] < 10:
         return '横置き'
+    markers = ('\u2713', '\u2714', '\u25cf', '\u25cb', 'o', 'O', '\u25a1', '\u2611', '*')
+    scan_rows = [8]
+    kw_row = _find_keyword_row(df, ['横置き', '縦置き', '横置', '縦置'])
+    if kw_row is not None and kw_row not in scan_rows:
+        scan_rows.append(kw_row)
+
+    def _is_label(val):
+        return val in ('横置き', '横置', '縦置き', '縦置')
+
+    def _orientation_of(val):
+        if val in ('横置き', '横置'):
+            return '横置き'
+        return '縦置き'
+
+    def _has_marker(df, r, c):
+        for nc in (c - 1, c + 1):
+            if 0 <= nc < df.shape[1]:
+                if _safe_str(df.iat[r, nc]) in markers:
+                    return True
+        return False
+
+    # 第一遍：优先返回「带选中标记」的朝向（标记可能在标签相邻列）
+    for r in scan_rows:
+        if r >= df.shape[0]:
+            continue
+        for c in range(min(_SCAN_MAX_COL, df.shape[1])):
+            val = _safe_str(df.iat[r, c])
+            if _is_label(val) and _has_marker(df, r, c):
+                return _orientation_of(val)
+
+    # 第二遍：仅当「唯一出现」某个朝向时才采用（两个都写但都没标记则不在此决断）
+    for r in scan_rows:
+        if r >= df.shape[0]:
+            continue
+        labels = [_safe_str(df.iat[r, c]) for c in range(min(_SCAN_MAX_COL, df.shape[1]))]
+        has_yoko = any(v in ('横置き', '横置') for v in labels)
+        has_tate = any(v in ('縦置き', '縦置') for v in labels)
+        if has_yoko and not has_tate:
+            return '横置き'
+        if has_tate and not has_yoko:
+            return '縦置き'
+
+    # 第三遍：含 横/縦 字的兜底（仅当上方未能唯一判定）
+    for r in scan_rows:
+        if r >= df.shape[0]:
+            continue
+        for c in range(min(_SCAN_MAX_COL, df.shape[1])):
+            val = _safe_str(df.iat[r, c])
+            if '横' in val:
+                return '横置き'
+            if '縦' in val:
+                return '縦置き'
+    return '横置き'
+
     scan_rows = [8]
     kw_row = _find_keyword_row(df, ['横置き', '縦置き', '横置', '縦置'])
     if kw_row is not None and kw_row not in scan_rows:

@@ -74,6 +74,7 @@ def split_and_create_quotations(
         always_exclude_extra_items=False,
         ko_exclude_options=None,
         pre_parsed_bom_data=None,
+        need_total_qty=False,
         need_total_materials=False,
         **kwargs
 ):

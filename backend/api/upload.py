@@ -30,7 +30,8 @@ def upload_bom_route():
 def upload_matrix_route():
     ensure_permission('quotation')
     group = request.form.get('group') or None
-    payload, status = upload_matrix_file(request.files.get('file'), group=group)
+    ap_case_type = request.form.get('ap_case_type') or None
+    payload, status = upload_matrix_file(request.files.get('file'), group=group, ap_case_type=ap_case_type)
     return jsonify(payload), status
 
 

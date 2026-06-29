@@ -225,22 +225,54 @@ def get_temp_base_price(price_info, product, group='韩语组', sale_type='expor
 def apply_temp_preinstall_adjustment(price_info, folded_price, product, group='韩语组', sale_type='export'):
     """对「长度折算后」的件级单价施加预装调整。
 
-    规则（仅临时询价来源 + USD/EUR 时生效，其余原值返回）：
-      预装   = 件价 + 1
-      非预装 = 件价 × 1.1
+    规则（仅临时询价来源时生效，其余原值返回）：
+      预装：人民币底价 + 1，再换算外币
+      非预装：人民币底价 × 1.1，再换算外币
     注意：+1 必须在长度折算之后施加，即「米长单价×米长 + 1」，
     而非「(米长单价+1)×米长」。
     """
     if not price_info or not price_info.get('temp_inquiry'):
         return folded_price
-    if _temp_pricing_currency(group, sale_type) in ('rmb', 'rmb_fx'):
-        return folded_price
     try:
         base = float(folded_price)
     except (TypeError, ValueError):
         return folded_price
+
+    rmb_base = price_info.get('ton_price_rmb')
+    exchange_rate = price_info.get('exchange_rate')
+    points = price_info.get('points')
+    rate_category = price_info.get('rate_category') or ''
+
+    if rmb_base is not None and exchange_rate and points:
+        try:
+            rmb = float(rmb_base)
+        except (TypeError, ValueError):
+            rmb = None
+    else:
+        rmb = None
+
+    is_domestic = _temp_pricing_currency(group, sale_type) in ('rmb', 'rmb_fx')
+
     if _temp_preinstall_value(product) == '非预装':
+        if rmb is not None:
+            if is_domestic:
+                return round(rmb * 1.1, 6)
+            adjusted_rmb = rmb * 1.1
+            if rate_category == 'dizhuang':
+                return round(adjusted_rmb / exchange_rate, 6)
+            return round(adjusted_rmb / exchange_rate / points, 6)
         return round(base * 1.1, 6)
+
+    if rmb is not None:
+        if is_domestic:
+            return round(rmb + 1, 6)
+        adjusted_rmb = rmb + 1
+        if rate_category == 'dizhuang':
+            return round(adjusted_rmb / exchange_rate, 6)
+        return round(adjusted_rmb / exchange_rate / points, 6)
+
+    if is_domestic:
+        return base
     return round(base + 1, 6)
 
 

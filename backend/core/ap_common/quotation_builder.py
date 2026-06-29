@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 import uuid
+from time import perf_counter
 
 from openpyxl import Workbook
 
@@ -81,12 +82,17 @@ def split_and_create_quotations(
         always_exclude_extra_items=False,
         ap_exclude_options=None,
         pre_parsed_bom_data=None,
+        pre_parsed_products_by_key=None,
+        pre_parsed_bom_info_by_key=None,
         bom_sheet_keyword=None,
         **kwargs
 ):
     ap_discount_rate = kwargs.get('ap_discount_rate', 100)
     ap_steel_discount_rate = kwargs.get('ap_steel_discount_rate', 100)
     ap_purchased_discount_rate = kwargs.get('ap_purchased_discount_rate', 100)
+    ap_freight = kwargs.get('ap_freight', 0)
+    dest_port = dest_port or kwargs.get('dest_port') or 'XIAMEN'
+    module_wattage = kwargs.get('module_wattage')
     if output_dir is None:
         output_dir = os.path.join(os.path.dirname(input_file), 'quotation_output')
     os.makedirs(output_dir, exist_ok=True)
@@ -116,6 +122,8 @@ def split_and_create_quotations(
 
     print(f"\n{'=' * 80}\n[AP] Processing: {input_file}\n{'=' * 80}\n")
 
+    _t_parse = perf_counter()
+
     if price_mapping_override is not None:
         price_mapping = price_mapping_override
     else:
@@ -133,7 +141,38 @@ def split_and_create_quotations(
     zip_products_by_key = None
     zip_bom_info_by_key = None
 
-    if pre_parsed_bom_data is not None:
+    # service 单次解析后透传（ZIP 表示），命中即跳过 builder 自身的二次解析
+    if pre_parsed_products_by_key is not None and pre_parsed_bom_info_by_key is not None:
+        zip_products_by_key = pre_parsed_products_by_key
+        zip_bom_info_by_key = pre_parsed_bom_info_by_key
+        _valid_arrays = 0
+        for _bkey, _binfo in zip_bom_info_by_key.items():
+            _arr = str((_binfo.get('config') or {}).get('array', ''))
+            _ar, _ac = parse_array_to_rows_cols(_arr)
+            if _ar and _ac:
+                _valid_arrays += 1
+        if zip_products_by_key and _valid_arrays >= len(zip_bom_info_by_key):
+            use_zip = True
+            print(f"[AP] Pre-parsed reuse: {len(zip_products_by_key)} BOM entries (skip re-parse)")
+        else:
+            print(f"[AP] Pre-parsed invalid arrays ({_valid_arrays}/{len(zip_bom_info_by_key)}), re-parse")
+            zip_products_by_key = None
+            zip_bom_info_by_key = None
+
+    if use_zip:
+        if bom_sheet_keyword:
+            _keep = {k: v for k, v in zip_products_by_key.items() if bom_sheet_keyword in k}
+            _keep_info = {k: v for k, v in zip_bom_info_by_key.items() if bom_sheet_keyword in k}
+            print(f"[AP] Sheet filter '{bom_sheet_keyword}': {len(zip_products_by_key)} → {len(_keep)} sheets")
+            zip_products_by_key = _keep
+            zip_bom_info_by_key = _keep_info
+        xls = None
+        bom_sheet_names = []
+        parsed_sheets = {}
+        bom_starts_map = {}
+        bom_df_map = {}
+        products_map = {}
+    elif pre_parsed_bom_data is not None:
         bom_sheet_names = pre_parsed_bom_data.get('bom_sheet_names', [])
         parsed_sheets = pre_parsed_bom_data.get('parsed_sheets', {})
         bom_starts_map = pre_parsed_bom_data.get('bom_starts_map', {})
@@ -164,12 +203,6 @@ def split_and_create_quotations(
                 else:
                     use_zip = True
                     print(f"[AP] ZIP fast parsing: {len(zip_products_by_key)} BOM entries")
-                    if bom_sheet_keyword:
-                        _keep = {k: v for k, v in zip_products_by_key.items() if bom_sheet_keyword in k}
-                        _keep_info = {k: v for k, v in zip_bom_info_by_key.items() if bom_sheet_keyword in k}
-                        print(f"[AP] Sheet filter '{bom_sheet_keyword}': {len(zip_products_by_key)} → {len(_keep)} sheets")
-                        zip_products_by_key = _keep
-                        zip_bom_info_by_key = _keep_info
         except Exception:
             pass
 
@@ -188,8 +221,12 @@ def split_and_create_quotations(
             bom_df_map = {}
             products_map = {}
 
+
     master_wb = Workbook()
     master_wb.remove(master_wb.active)
+
+    print(f"[AP-TIME] BOM parse phase: {perf_counter() - _t_parse:.2f}s")
+    _t_collect = perf_counter()
 
     all_quotation_results = []
     collected_arrays = []
@@ -215,6 +252,7 @@ def split_and_create_quotations(
             ap_exclude_options=ap_exclude_options,
             trade_method=trade_method,
             need_weight_code=need_weight_code,
+            module_wattage=module_wattage,
         )
 
     def _collect(df_arg, config, effective_matrix_data, pre_parsed_products, matched_array, matched_idx, label):
@@ -564,12 +602,17 @@ def split_and_create_quotations(
                 import traceback
                 print(f"   ❌ AP indirect detail failed: {e}"); traceback.print_exc()
 
+    print(f"[AP-TIME] collect phase: {perf_counter() - _t_collect:.2f}s "
+          f"(arrays={len(collected_arrays)})")
+
     # ========== 地桩汇总 ==========
     if pile_products_all:
         _pa = 0.0
         for _pp in pile_products_all:
             _pp_code = _pp.get('code', '')
-            _pp_pi = resolve_price_info(price_mapping, _pp_code, spec=_pp.get('spec', '')) if price_mapping else None
+            _pp_pi = _pp.get('_price_info')
+            if not _pp_pi and price_mapping:
+                _pp_pi = resolve_price_info(price_mapping, _pp_code, spec=_pp.get('spec', ''))
             _pp_price = get_temp_adjusted_base_price(_pp_pi, _pp, '亚太组', sale_type) if _pp_pi and has_valid_price_info(_pp_pi) else 0
             _pp_unit = (_pp_pi.get('unit', '') if _pp_pi else '') or ''
             if _pp_unit in ('米', 'm', 'M', 'meter'):
@@ -584,6 +627,7 @@ def split_and_create_quotations(
         pass  # 单页输出：无需按矩阵阵列重排工作表
 
     if collected_arrays:
+        _t_render = perf_counter()
         try:
             sites = [arr.get('site', {}) for arr in collected_arrays]
             aggregated_items = aggregate_ap_items(collected_arrays)
@@ -597,8 +641,13 @@ def split_and_create_quotations(
                 ap_discount_rate=ap_discount_rate,
                 ap_steel_discount_rate=ap_steel_discount_rate,
                 ap_purchased_discount_rate=ap_purchased_discount_rate,
+                ap_freight=ap_freight,
+                dest_port=dest_port,
+                module_wattage=module_wattage,
             )
             all_quotation_results.append(result)
+            print(f"[AP-TIME] render+image phase: {perf_counter() - _t_render:.2f}s "
+                  f"(items={len(aggregated_items)})")
             print(f"\n[AP] Done! 1 sheet ({len(aggregated_items)} items, "
                   f"sites={len(sites)}, total={result.get('total_price', 0):.2f})")
         except Exception as e:
@@ -608,7 +657,9 @@ def split_and_create_quotations(
         input_basename = os.path.splitext(os.path.basename(input_file))[0]
         output_file = os.path.join(output_dir, f"{input_basename}_报价汇总.xlsx")
         set_page_break_preview(master_wb)
+        _t_save = perf_counter()
         master_wb.save(output_file)
+        print(f"[AP-TIME] save phase: {perf_counter() - _t_save:.2f}s")
         print(f"[AP] Saved → {output_file}")
 
         inquiry_file = None

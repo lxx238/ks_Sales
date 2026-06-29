@@ -11,7 +11,11 @@ from decimal import Decimal
 import math
 
 from backend.core.shared.text_utils import _CJK_RE, _strip_cjk_spec, normalize_lookup_code
-from backend.core.shared.price_utils import resolve_price_info, has_valid_price_info, round_to_2_decimal, get_temp_adjusted_base_price, get_temp_base_price, apply_temp_preinstall_adjustment
+from backend.core.shared.price_utils import (
+    resolve_price_info, has_valid_price_info, round_to_2_decimal,
+    get_temp_adjusted_base_price, get_temp_base_price, apply_temp_preinstall_adjustment,
+    _get_discount_category,
+)
 from backend.core.shared.product_utils import _is_valid_product_code, normalize_preinstall
 from backend.core.shared.weight_utils import extract_length_from_spec
 from backend.core.material_translate import translate_material
@@ -130,7 +134,8 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
                         sheet_prefix=None,
                         image_path=None, image_folder=None, code_to_images=None,
                         image_temp_dir=None, image_cache=None, matrix_data=None,
-                        discount_rate=None, group=None,
+                        discount_rate=None, steel_discount_rate=None,
+                        purchased_discount_rate=None, steel_pack=None, group=None,
                         unmatched_products_out=None,
                         excluded_products=None,
                         need_weight_code=True,
@@ -266,6 +271,18 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
 
     name_field = 'name_ja'
     total_price_sum = Decimal('0')
+    category_sums = {
+        'standard': Decimal('0'),
+        'steel': Decimal('0'),
+        'purchased': Decimal('0'),
+    }
+    category_row_lists = {
+        'standard': [],
+        'steel': [],
+        'purchased': [],
+        'inquiry': [],
+        'unmatched': [],
+    }
     pile_qty = 0
     pile_products_info = []
     matched_count = 0
@@ -359,7 +376,10 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
         if is_meter:
             length_mm = Decimal(str(extract_length_from_spec(product.get('spec')) or 0))
 
-        if is_meter and length_mm > 0:
+        # 临时询价来源：单价已是每件价，不再二次折算
+        if price_info and price_info.get('temp_inquiry'):
+            display_unit_price = unit_price
+        elif is_meter and length_mm > 0:
             display_unit_price = float(Decimal(str(unit_price)) * length_mm / Decimal('1000'))
         else:
             display_unit_price = unit_price
@@ -394,15 +414,23 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
             total_price = Decimal(str(display_unit_price)) * Decimal(str(quantity))
 
         total_price_rounded = round_to_2_decimal(total_price)
+        cat = _get_discount_category(price_info, product)
+        category_row_lists[cat].append(row)
         if total_price_rounded > 0:
             total_price_sum += total_price_rounded
+            category_sums[cat] += total_price_rounded
+        elif not is_pile:
+            if _is_valid_product_code(product_code):
+                category_row_lists['inquiry'].append(row)
+            else:
+                category_row_lists['unmatched'].append(row)
 
         if display_unit_price > 0 or is_pile:
             ws.cell(row=row, column=8, value=f'=F{row}*G{row}').border = thin_border
             ws.cell(row=row, column=8).number_format = CURRENCY_FMT
             ws.cell(row=row, column=8).font = data_font
         else:
-            ws.cell(row=row, column=8, value='').border = thin_border
+            ws.cell(row=row, column=8, value=f'=F{row}*G{row}').border = thin_border
             ws.cell(row=row, column=8).font = data_font
 
         ws.cell(row=row, column=2).alignment = center
@@ -511,11 +539,12 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
     if image_found_count or image_not_found_count:
         print(f"   🖼️ {sheet_name}: 挿入 {image_found_count} 枚, 未検出 {image_not_found_count} 枚")
 
-    center_both = Alignment(horizontal='right', vertical='center')
+    center_both = Alignment(horizontal='center', vertical='center')
+    right_label_align = Alignment(horizontal='right', vertical='center')
     sub_row = data_end + 1
     ws.merge_cells(f'A{sub_row}:G{sub_row}')
     ws[f'A{sub_row}'] = 'SUB-TOTAL-（FOB）1基スクリュー杭基礎架台合計'
-    ws[f'A{sub_row}'].alignment = center_both
+    ws[f'A{sub_row}'].alignment = right_label_align
     ws[f'A{sub_row}'].font = data_font
 
     sub_total_merge_end = 8 if not need_weight_code else 10
@@ -530,7 +559,73 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
         ws.cell(row=sub_row, column=c).border = thin_border
         ws.cell(row=sub_row, column=c).font = data_font
 
-    _apply_outer_border(ws, 1, sub_row, 1, max_col)
+    _disc_rate = Decimal(str(discount_rate if discount_rate is not None else DEFAULT_DISCOUNT_RATE * 100))
+    _steel_rate = Decimal(str(steel_discount_rate if steel_discount_rate is not None else 84))
+    _purch_rate = Decimal(str(purchased_discount_rate if purchased_discount_rate is not None else 94))
+
+    cat_label_map = [
+        ('standard', '標準部品小計'),
+        ('steel', '碳鋼部品小計'),
+        ('purchased', '外購部品小計'),
+    ]
+    category_rows = {}
+    cat_start_row = sub_row + 1
+    for cat_idx, (cat, label) in enumerate(cat_label_map):
+        r = cat_start_row + cat_idx
+        category_rows[cat] = r
+        ws.merge_cells(f'A{r}:G{r}')
+        ws[f'A{r}'] = label
+        ws[f'A{r}'].alignment = right_label_align
+        ws[f'A{r}'].font = data_font
+        if sub_total_merge_end > 8:
+            ws.merge_cells(f'H{r}:{get_column_letter(sub_total_merge_end)}{r}')
+        cat_rows = category_row_lists.get(cat, [])
+        if cat_rows:
+            refs = ','.join(f'H{row}' for row in cat_rows)
+            cat_formula = f'=SUM({refs})'
+            if len(cat_formula) > 8000:
+                cat_formula = float(category_sums[cat])
+        else:
+            cat_formula = 0
+        ws.cell(row=r, column=8, value=cat_formula)
+        ws.cell(row=r, column=8).number_format = CURRENCY_FMT
+        ws.cell(row=r, column=8).font = data_font
+        ws.cell(row=r, column=8).alignment = center_both
+        ws.row_dimensions[r].height = 30
+        for c in range(1, max_col + 1):
+            ws.cell(row=r, column=c).border = thin_border
+            ws.cell(row=r, column=c).font = data_font
+
+    discounted_row = cat_start_row + len(cat_label_map)
+    ws.merge_cells(f'A{discounted_row}:G{discounted_row}')
+    ws[f'A{discounted_row}'] = '特別値引き後合計'
+    ws[f'A{discounted_row}'].alignment = right_label_align
+    ws[f'A{discounted_row}'].font = data_font
+    if sub_total_merge_end > 8:
+        ws.merge_cells(f'H{discounted_row}:{get_column_letter(sub_total_merge_end)}{discounted_row}')
+    _std_row = category_rows['standard']
+    _steel_row = category_rows['steel']
+    _purch_row = category_rows['purchased']
+    ws.cell(
+        row=discounted_row, column=8,
+        value=(
+            f'=H{_std_row}*{float(_disc_rate)}/100'
+            f'+H{_steel_row}*{float(_steel_rate)}/100'
+            f'+H{_purch_row}*{float(_purch_rate)}/100'
+        )
+    )
+    ws.cell(row=discounted_row, column=8).number_format = CURRENCY_FMT
+    ws.cell(row=discounted_row, column=8).font = data_font
+    ws.cell(row=discounted_row, column=8).alignment = center_both
+    ws.row_dimensions[discounted_row].height = 30
+    for c in range(1, max_col + 1):
+        ws.cell(row=discounted_row, column=c).border = thin_border
+        ws.cell(row=discounted_row, column=c).font = data_font
+
+    for cat_label, _cat_r in category_rows.items():
+        ws.row_dimensions[_cat_r].hidden = True
+
+    _apply_outer_border(ws, 1, discounted_row, 1, max_col)
 
     apply_print_setup(ws, 'ja_EST')
 
@@ -539,6 +634,14 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
         'array_info': array_info,
         'total_price_per_base': float(total_price_sum),
         'total_price': float(total_price_sum),
+        'category_totals_per_base': {
+            'standard': float(category_sums['standard']),
+            'steel': float(category_sums['steel']),
+            'purchased': float(category_sums['purchased']),
+        },
+        'category_rows': category_rows,
+        'category_row_lists': category_row_lists,
+        'discounted_total_row': discounted_row,
         'matched_count': matched_count,
         'unmatched_count': unmatched_count,
         'sub_total_row': sub_row,
@@ -822,9 +925,47 @@ def create_summary_sheet(workbook, detail_results, matrix_data=None,
     # ========== Row 12+: 数据行 ==========
     discount_rate_pct = shipping_data.get('discount_rate', 71) if shipping_data else 71
     discount_rate = Decimal(str(discount_rate_pct)) / 100
+    steel_discount_rate_pct = shipping_data.get('steel_discount_rate', 84) if shipping_data else 84
+    purchased_discount_rate_pct = shipping_data.get('purchased_discount_rate', 94) if shipping_data else 94
     grand_total = Decimal('0')
     grand_output_kw = Decimal('0')
     data_row_start = 12
+
+    def _cat_disc_formula(detail_or_group, total_base=None):
+        """Build a formula that applies category-specific discount rates via detail-sheet sub-totals.
+
+        If ``detail_or_group`` is a list, it represents an accumulated group and
+        ``total_base`` must be provided.  Otherwise it is a single detail dict.
+        """
+        is_group = isinstance(detail_or_group, list)
+        items = detail_or_group if is_group else [detail_or_group]
+        cat_cols = {'standard': [], 'steel': [], 'purchased': []}
+        for _d in items:
+            _cat_rows = _d.get('category_rows') or {}
+            _base = _d.get('array_info', {}).get('table_qty', 1)
+            _sn = _d.get('sheet_name', '')
+            _sn_esc = _sn.replace("'", "''")
+            for cat, r in _cat_rows.items():
+                if cat in cat_cols and r:
+                    cat_cols[cat].append(f"'{_sn_esc}'!H{r}*{_base}")
+        parts = []
+        for cat, cols, rate in [
+            ('standard', cat_cols['standard'], discount_rate_pct),
+            ('steel', cat_cols['steel'], steel_discount_rate_pct),
+            ('purchased', cat_cols['purchased'], purchased_discount_rate_pct),
+        ]:
+            if not cols:
+                continue
+            if is_group:
+                parts.append(f'({"+".join(cols)})/{total_base}*{rate}/100')
+            else:
+                parts.append(f'({"+".join(cols)})*{rate}/100')
+        if not parts:
+            return None
+        formula = '=' + '+'.join(parts)
+        if len(formula) > 8000:
+            return None
+        return formula
 
     if arrays:
         _arr_pos = {}
@@ -929,7 +1070,33 @@ def create_summary_sheet(workbook, detail_results, matrix_data=None,
             ws.cell(row=row, column=8).number_format = CURRENCY_FMT
             ws.cell(row=row, column=8).alignment = center
 
-            ws.cell(row=row, column=9, value=f'=H{row}*{discount_rate_pct}/100').font = SM_FONT
+            _acc_total = Decimal('0')
+            for _gd in _group:
+                _gd_base = Decimal(str(_gd.get('array_info', {}).get('table_qty', 1)))
+                _cat_totals = _gd.get('category_totals_per_base') or {}
+                _gd_special = round_to_2_decimal(
+                    Decimal(str(_cat_totals.get('standard', 0))) * Decimal(str(discount_rate_pct)) / Decimal('100') +
+                    Decimal(str(_cat_totals.get('steel', 0))) * Decimal(str(steel_discount_rate_pct)) / Decimal('100') +
+                    Decimal(str(_cat_totals.get('purchased', 0))) * Decimal(str(purchased_discount_rate_pct)) / Decimal('100')
+                )
+                _acc_total += round_to_2_decimal(_gd_special * _gd_base)
+            _special_per_base = round_to_2_decimal(_acc_total / Decimal(str(_total_base))) if _total_base else Decimal('0')
+
+            _discounted_parts = []
+            for _gd in _group:
+                _sn = _gd.get('sheet_name', '')
+                _dr = _gd.get('discounted_total_row')
+                _gd_base = _gd.get('array_info', {}).get('table_qty', 1)
+                if _dr:
+                    _discounted_parts.append(f"'{_sn}'!H{_dr}*{_gd_base}")
+            if _discounted_parts:
+                _i_formula = f'=({"+".join(_discounted_parts)})/{_total_base}'
+                if len(_i_formula) <= 8000:
+                    ws.cell(row=row, column=9, value=_i_formula).font = SM_FONT
+                else:
+                    ws.cell(row=row, column=9, value=float(_special_per_base)).font = SM_FONT
+            else:
+                ws.cell(row=row, column=9, value=float(_special_per_base)).font = SM_FONT
             ws.cell(row=row, column=9).number_format = CURRENCY_FMT
             ws.cell(row=row, column=9).alignment = center
             ws.cell(row=row, column=9).fill = BLUE_FILL
@@ -943,12 +1110,6 @@ def create_summary_sheet(workbook, detail_results, matrix_data=None,
             for c in range(1, 12):
                 ws.cell(row=row, column=c).border = thin_border
 
-            _acc_total = Decimal('0')
-            for _gd in _group:
-                _gd_base = Decimal(str(_gd.get('array_info', {}).get('table_qty', 1)))
-                _gd_per_base = Decimal(str(_gd.get('total_price_per_base', 0)))
-                _gd_special = round_to_2_decimal(_gd_per_base * discount_rate)
-                _acc_total += round_to_2_decimal(_gd_special * _gd_base)
             grand_total += _acc_total
             grand_output_kw += gen_kw
         else:
@@ -975,7 +1136,12 @@ def create_summary_sheet(workbook, detail_results, matrix_data=None,
 
             gen_kw = Decimal(str(effective_panels_per_base)) * Decimal(str(base_count)) * Decimal(str(module_wattage)) / Decimal('1000')
             per_base = Decimal(str(detail.get('total_price_per_base', 0)))
-            special_price = round_to_2_decimal(per_base * discount_rate)
+            cat_totals = detail.get('category_totals_per_base') or {}
+            special_price = round_to_2_decimal(
+                Decimal(str(cat_totals.get('standard', per_base))) * Decimal(str(discount_rate_pct)) / Decimal('100') +
+                Decimal(str(cat_totals.get('steel', 0))) * Decimal(str(steel_discount_rate_pct)) / Decimal('100') +
+                Decimal(str(cat_totals.get('purchased', 0))) * Decimal(str(purchased_discount_rate_pct)) / Decimal('100')
+            )
             total_amount = round_to_2_decimal(special_price * Decimal(str(base_count)))
 
             ws.cell(row=row, column=1, value=_visible_row).font = SM_FONT
@@ -1007,7 +1173,11 @@ def create_summary_sheet(workbook, detail_results, matrix_data=None,
             ws.cell(row=row, column=8, value=f"='{detail_sheet_name}'!H{sub_total_row}").font = SM_FONT
             ws.cell(row=row, column=8).number_format = CURRENCY_FMT
             ws.cell(row=row, column=8).alignment = center
-            ws.cell(row=row, column=9, value=f'=H{row}*{discount_rate_pct}/100').font = SM_FONT
+            discounted_total_row = detail.get('discounted_total_row')
+            if discounted_total_row:
+                ws.cell(row=row, column=9, value=f"='{detail_sheet_name}'!H{discounted_total_row}").font = SM_FONT
+            else:
+                ws.cell(row=row, column=9, value=float(special_price)).font = SM_FONT
             ws.cell(row=row, column=9).number_format = CURRENCY_FMT
             ws.cell(row=row, column=9).alignment = center
             ws.cell(row=row, column=9).fill = BLUE_FILL
@@ -1031,8 +1201,13 @@ def create_summary_sheet(workbook, detail_results, matrix_data=None,
         for inv_idx, inv_detail_item in enumerate(inv_details):
             row = data_row_start + inverter_row_idx
             inv_matched_table_qty = inv_detail_item.get('array_info', {}).get('table_qty', 1)
+            inv_cat_totals = inv_detail_item.get('category_totals_per_base') or {}
             inv_per_base = Decimal(str(inv_detail_item.get('total_price_per_base', 0)))
-            inv_special = round_to_2_decimal(inv_per_base * discount_rate)
+            inv_special = round_to_2_decimal(
+                Decimal(str(inv_cat_totals.get('standard', inv_per_base))) * Decimal(str(discount_rate_pct)) / Decimal('100') +
+                Decimal(str(inv_cat_totals.get('steel', 0))) * Decimal(str(steel_discount_rate_pct)) / Decimal('100') +
+                Decimal(str(inv_cat_totals.get('purchased', 0))) * Decimal(str(purchased_discount_rate_pct)) / Decimal('100')
+            )
             inverter_grand_amount += inv_special * Decimal(str(inv_matched_table_qty))
 
             inv_remark_text = inv_detail_item.get('inv_remark', '')
@@ -1063,7 +1238,11 @@ def create_summary_sheet(workbook, detail_results, matrix_data=None,
             ws.cell(row=row, column=8, value=f"='{inv_sheet_name}'!H{inv_sub_row}").font = SM_FONT
             ws.cell(row=row, column=8).number_format = CURRENCY_FMT
             ws.cell(row=row, column=8).alignment = center
-            ws.cell(row=row, column=9, value=f'=H{row}*{discount_rate_pct}/100').font = SM_FONT
+            inv_discounted_total_row = inv_detail_item.get('discounted_total_row')
+            if inv_discounted_total_row:
+                ws.cell(row=row, column=9, value=f"='{inv_sheet_name}'!H{inv_discounted_total_row}").font = SM_FONT
+            else:
+                ws.cell(row=row, column=9, value=float(inv_special)).font = SM_FONT
             ws.cell(row=row, column=9).number_format = CURRENCY_FMT
             ws.cell(row=row, column=9).alignment = center
             ws.cell(row=row, column=9).fill = BLUE_FILL

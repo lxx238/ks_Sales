@@ -222,6 +222,7 @@ def split_and_create_quotations(
                 image_temp_dir=image_temp_dir,
                 image_cache=image_cache,
                 angle_override=config.get('angle', '') or None,
+                need_weight_code=need_weight_code,
             )
             detail['config'] = config
             detail['variant_name'] = bom_info.get('variant_name', '')

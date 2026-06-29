@@ -27,10 +27,13 @@ def analyze_bom_db_only(data):
             return {'success': False, 'message': 'BOM 文件不存在'}, 400
 
         log_analyze(f'resolved bom path: {bom_file}')
+
+        module_wattage = data.get('module_wattage')
         ctx = build_bom_material_context(
             bom_file,
             selected_bom_keys=selected_bom_keys,
             group=group,
+            module_wattage=module_wattage,
         )
         _, material_mapping, analysis_result = ctx[0], ctx[1], ctx[2]
         analysis_result['material_record_count'] = len({id(record) for record in material_mapping.values()})

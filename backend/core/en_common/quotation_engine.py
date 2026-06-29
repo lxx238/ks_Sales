@@ -567,6 +567,7 @@ def create_detail_sheet(workbook, array_info, bom_products, price_mapping,
 def create_total_materials_sheet(workbook, all_quotation_results, price_mapping=None,
                                   sale_type='export', coating_thickness=10, lang='en',
                                   need_weight_code=False, need_total_qty=False,
+                                  show_code=False,
                                   discount_method='project',
                                   ko_discount_rate=100, ko_steel_discount_rate=84,
                                   ko_purchased_discount_rate=94, **kwargs):
@@ -697,6 +698,7 @@ def create_total_materials_sheet(workbook, all_quotation_results, price_mapping=
     col_amount = col_idx; col_idx += 1
     if need_weight_code:
         col_weight = col_idx; col_idx += 1
+    if show_code or need_weight_code:
         col_code = col_idx; col_idx += 1
     max_col = col_idx - 1
 
@@ -713,6 +715,7 @@ def create_total_materials_sheet(workbook, all_quotation_results, price_mapping=
     col_widths[get_column_letter(col_amount)] = 18
     if need_weight_code:
         col_widths[get_column_letter(col_weight)] = 14
+    if show_code or need_weight_code:
         col_widths[get_column_letter(col_code)] = 22
     for col, w in col_widths.items():
         ws.column_dimensions[col].width = w
@@ -741,7 +744,8 @@ def create_total_materials_sheet(workbook, all_quotation_results, price_mapping=
     headers[col_amount] = _t('total_hdr_amount', lang).format(currency=currency_label)
     if need_weight_code:
         headers[col_weight] = _t('hdr_weight', lang)
-        headers[col_code] = _t('hdr_remark', lang)
+    if show_code or need_weight_code:
+        headers[col_code] = _t('total_hdr_code', lang) if show_code else _t('hdr_remark', lang)
     for ci, h in headers.items():
         cell = ws.cell(row=header_row, column=ci, value=h)
         cell.font = bold_font
@@ -812,6 +816,7 @@ def create_total_materials_sheet(workbook, all_quotation_results, price_mapping=
             ws.cell(row=r, column=col_weight).alignment = center_align
             ws.cell(row=r, column=col_weight).border = thin_border
 
+        if show_code or need_weight_code:
             ws.cell(row=r, column=col_code, value=item.get('code', '')).font = normal_font
             ws.cell(row=r, column=col_code).alignment = center_align
             ws.cell(row=r, column=col_code).border = thin_border

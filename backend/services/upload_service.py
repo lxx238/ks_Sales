@@ -70,11 +70,11 @@ def upload_bom_file(file_storage):
         return {'success': False, 'message': f'文件读取失败: {exc}'}, 400
 
 
-def upload_matrix_file(file_storage, group=None):
+def upload_matrix_file(file_storage, group=None, ap_case_type=None):
     filepath = None
     try:
         file_id, filename, filepath = _save_uploaded_file(file_storage)
-        matrix_data = extract_matrix_data(filepath, group=group)
+        matrix_data = extract_matrix_data(filepath, group=group, ap_case_type=ap_case_type)
         return {
             'success': True,
             'file_id': file_id,

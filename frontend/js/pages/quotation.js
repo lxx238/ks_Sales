@@ -116,6 +116,17 @@
         <span>中文</span>
       </label>
     </div>
+    <div data-group-only="亚太组" style="display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text);">
+      <span style="font-weight: 600;">案件类型：</span>
+      <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+        <input type="radio" name="ap-case-type" value="ROOF" checked style="width: 16px; height: 16px;">
+        <span>屋顶</span>
+      </label>
+      <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+        <input type="radio" name="ap-case-type" value="GROUND" style="width: 16px; height: 16px;">
+        <span>地面</span>
+      </label>
+    </div>
   </div>
   <p>统一使用标准定价表与 BOM 表进行匹配。若已设置全局价格表，日常只需上传 BOM 表即可。</p>
   <div class="upload-grid quotation-upload-grid">
@@ -358,6 +369,13 @@
           <span>％</span>
         </label>
         <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-bottom: 4px;">
+          <span style="width: 120px;">碳钢包装</span>
+          <select id="normal-steel-pack" style="width: 100px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+            <option value="jybz" selected>简易包装</option>
+            <option value="tietuo">铁托</option>
+          </select>
+        </label>
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-bottom: 4px;">
           <span style="width: 120px;">消費税</span>
           <input type="number" id="normal-consumption-tax" value="10" step="0.1" style="width: 80px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
           <span>％</span>
@@ -590,6 +608,21 @@
           <input type="number" id="ja-discount-rate" value="71" step="1" style="width: 80px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
           <span>％</span>
         </label>
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-top: 4px;">
+          <span style="width: 80px;">碳钢折扣率</span>
+          <input type="number" id="ja-steel-discount-rate" value="84" step="1" style="width: 80px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+          <span>％</span>
+          <span style="width: 80px; margin-left: 8px;">碳钢包装</span>
+          <select id="ja-steel-pack" style="width: 100px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+            <option value="jybz" selected>简易包装</option>
+            <option value="tietuo">铁托</option>
+          </select>
+        </label>
+        <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-top: 4px;">
+          <span style="width: 80px;">外购件折扣率</span>
+          <input type="number" id="ja-purchased-discount-rate" value="94" step="1" style="width: 80px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+          <span>％</span>
+        </label>
         <div style="font-size: 13px; color: var(--text); margin-top: 10px; margin-bottom: 6px; font-weight: 600;">配送车辆</div>
         <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-bottom: 4px;">
           <span>车辆规格</span>
@@ -814,6 +847,38 @@
             <input type="radio" name="ap-trade-method" value="CIF" style="width: 16px; height: 16px;">
             <span>CIF</span>
           </label>
+        </div>
+        <div id="ap-container-row" style="margin-top: 8px; display: none; font-size: 13px; color: var(--text);">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="width: 120px; font-weight: 600;">柜型/数量/运费</span>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+              <label style="display: flex; align-items: center; gap: 3px; cursor: pointer; padding: 3px 8px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 13px; color: var(--text);">
+                <input type="checkbox" id="ap-ct-20gp" value="20GP" style="width: 14px; height: 14px;">
+                <span style="font-weight: 500;">20GP</span>
+                <input type="number" id="ap-qty-20gp" value="1" min="1" step="1" style="width: 42px; padding: 2px 4px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; text-align: center;" disabled>
+                <span style="font-size: 11px; color: #64748b;">个</span>
+                <input type="number" id="ap-freight-20gp" value="" step="1" min="0" placeholder="运费" style="width: 58px; padding: 2px 4px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; text-align: center;" disabled>
+              </label>
+              <label style="display: flex; align-items: center; gap: 3px; cursor: pointer; padding: 3px 8px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; font-size: 13px; color: var(--text);">
+                <input type="checkbox" id="ap-ct-40hq" value="40HQ" checked style="width: 14px; height: 14px;">
+                <span style="font-weight: 500;">40HQ</span>
+                <input type="number" id="ap-qty-40hq" value="1" min="1" step="1" style="width: 42px; padding: 2px 4px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; text-align: center;">
+                <span style="font-size: 11px; color: #64748b;">个</span>
+                <input type="number" id="ap-freight-40hq" value="" step="1" min="0" placeholder="运费" style="width: 58px; padding: 2px 4px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px; text-align: center;">
+              </label>
+            </div>
+          </div>
+        </div>
+        <div id="ap-port-row" style="display: none; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-top: 8px;">
+          <span style="width: 120px;">港口</span>
+          <select id="ap-port" style="width: 120px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+            <option value="XIAMEN" selected>厦门</option>
+            <option value="TIANJIN">天津</option>
+          </select>
+        </div>
+        <div id="ap-module-wattage-row" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-top: 8px;">
+          <span style="width: 120px;">单瓦功率(W)</span>
+          <input type="number" id="module-wattage-input" value="670" step="1" min="0" placeholder="例如：670" style="width: 90px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
         </div>
         <div style="font-size: 13px; color: var(--text); margin-bottom: 6px; font-weight: 600;">折扣率设置</div>
         <div style="display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text); margin-bottom: 4px;">
@@ -1632,13 +1697,11 @@
         var ordered;
         var usedCards;
 
-        if (isAp) {
+        if (isAp && !isApGroundCase()) {
             grid.classList.add('ko-no-fence');
             combinedCard.style.minHeight = 'auto';
-            // 亚太组：删除信息表卡片（仅 BOM 上传流程），不再隐藏
-            if (infoCard.parentNode === combinedCard) {
-                combinedCard.removeChild(infoCard);
-            }
+            // 亚太屋顶：仅 BOM 上传流程，隐藏信息表卡片（保留节点便于切换地面时恢复）
+            infoCard.style.display = 'none';
             // 贸易方式 / 表面处理 移入 BOM 卡片下方
             var apPanel = containerEl.querySelector('#ap-params-panel');
             if (apPanel && bomCard) {
@@ -1656,7 +1719,9 @@
                     ordered.push(card);
                 }
             });
-        } else if (isKorean || isEnglish) {
+        } else if (isKorean || isEnglish || isApGroundCase()) {
+            // 地面案件需要信息表：确保信息表卡片显示
+            infoCard.style.display = '';
             grid.classList.add('ko-no-fence');
             var fenceCardKo = containerEl.querySelector('.ja-standard-fence-gate-card');
             var estFenceCardKo = containerEl.querySelector('.ja-external-fence-card');
@@ -2290,6 +2355,43 @@
             if (cifPortRow) cifPortRow.style.display = showCifPort ? 'flex' : 'none';
             if (containerRow) containerRow.style.display = showShipping ? 'block' : 'none';
         }
+
+        function updateApTradeVisibility() {
+            var methodEl = document.querySelector('input[name="ap-trade-method"]:checked');
+            var method = methodEl ? methodEl.value : 'EXW';
+            var needFreight = ['FOB', 'CIF'].indexOf(method) >= 0;
+            var containerRow = document.getElementById('ap-container-row');
+            var portRow = document.getElementById('ap-port-row');
+            // 柜型/运费仅地面案件且 FOB/CIF 时显示
+            if (containerRow) {
+                containerRow.style.display = (isApGroundCase() && needFreight) ? 'block' : 'none';
+            }
+            if (portRow) {
+                portRow.style.display = ['EXW', 'FOB', 'CIF'].indexOf(method) >= 0 ? 'flex' : 'none';
+            }
+            updateApModuleWattageVisibility();
+        }
+
+        function updateApContainerQtyVisibility() {
+            var cb20gp = document.getElementById('ap-ct-20gp');
+            var cb40hq = document.getElementById('ap-ct-40hq');
+            var qty20gp = document.getElementById('ap-qty-20gp');
+            var qty40hq = document.getElementById('ap-qty-40hq');
+            var freight20gp = document.getElementById('ap-freight-20gp');
+            var freight40hq = document.getElementById('ap-freight-40hq');
+            if (qty20gp) qty20gp.disabled = !(cb20gp && cb20gp.checked);
+            if (qty40hq) qty40hq.disabled = !(cb40hq && cb40hq.checked);
+            if (freight20gp) freight20gp.disabled = !(cb20gp && cb20gp.checked);
+            if (freight40hq) freight40hq.disabled = !(cb40hq && cb40hq.checked);
+        }
+
+        function updateApModuleWattageVisibility() {
+            var wattRow = document.getElementById('ap-module-wattage-row');
+            if (wattRow) {
+                wattRow.style.display = isApGroundCase() ? 'flex' : 'none';
+            }
+        }
+
         function setupCustomPortToggle(selectId, customId) {
             var sel = document.getElementById(selectId);
             var custom = document.getElementById(customId);
@@ -2326,6 +2428,16 @@
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', updateEnContainerQtyVisibility);
         });
+
+        var apTradeRadios = document.querySelectorAll('input[name="ap-trade-method"]');
+        apTradeRadios.forEach(function (r) {
+            r.addEventListener('change', updateApTradeVisibility);
+        });
+        ['ap-ct-20gp', 'ap-ct-40hq'].forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el) el.addEventListener('change', updateApContainerQtyVisibility);
+        });
+
         var enValiditySelect = document.getElementById('en-quote-validity');
         var enValidityCustom = document.getElementById('en-quote-validity-custom');
         var enValidityCustomUnit = document.getElementById('en-quote-validity-custom-unit');
@@ -2338,6 +2450,8 @@
         }
         updateEnTradeVisibility();
         updateEnContainerQtyVisibility();
+        updateApTradeVisibility();
+        updateApContainerQtyVisibility();
 
         var koDestPortSelectEl = document.getElementById('ko-dest-port');
         var koDestPortCustomInputEl = document.getElementById('ko-dest-port-custom');
@@ -2751,7 +2865,7 @@
 
         if (elements.bomUploadHint) {
             var _apGroup = typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '韩语组';
-            if (_apGroup === '亚太组') {
+            if (_apGroup === '亚太组' && !isApGroundCase()) {
                 elements.bomUploadHint.style.display = 'block';
                 elements.bomUploadHint.style.background = '#ecfeff';
                 elements.bomUploadHint.style.color = '#155e75';
@@ -2768,6 +2882,10 @@
     async function uploadBOMFile(file) {
         var _bomGroup = typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '韩语组';
         if (!state.matrixFileId && _bomGroup !== '亚太组') {
+            showStatus('请先上传信息表，再上传 BOM 表。', 'error');
+            return;
+        }
+        if (!state.matrixFileId && _bomGroup === '亚太组' && isApGroundCase()) {
             showStatus('请先上传信息表，再上传 BOM 表。', 'error');
             return;
         }
@@ -2794,7 +2912,13 @@
             state.bomTables = Array.isArray(data.bom_tables) ? data.bom_tables : [];
             state.selectedBomKeys = state.bomTables.map(function (item) { return item.key; });
             resetReportState();
-            renderBomTableSelection();
+
+            var _bomGroup2 = typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '韩语组';
+            if (_bomGroup2 === '亚太组' && !isApGroundCase()) {
+                renderBomTableSelection();
+            } else {
+                generateQuotation();
+            }
 
             if (elements.bomFileButton) {
                 elements.bomFileButton.textContent = '已上传: ' + file.name;
@@ -2803,18 +2927,11 @@
 
             if (elements.bomUploadHint) {
                 elements.bomUploadHint.style.display = 'block';
-                var displayedCount = state.selectedBomKeys.length;
                 var totalCount = data.bom_table_count || 0;
-                if (displayedCount < totalCount) {
+                if (_bomGroup2 === '亚太组' && !isApGroundCase()) {
                     elements.bomUploadHint.style.background = '#ecfeff';
                     elements.bomUploadHint.style.color = '#155e75';
-                    var mr = (state.matrixInfo && state.matrixInfo.array_rows) || '?';
-                    var mc = (state.matrixInfo && state.matrixInfo.array_cols) || '?';
-                    var matrixArrays = (state.matrixInfo && state.matrixInfo.arrays) || [];
-                    var arrayDesc = matrixArrays.length > 1
-                        ? matrixArrays.map(function(a) { return a.rows + '×' + a.cols; }).join(', ')
-                        : mr + '×' + mc;
-                    elements.bomUploadHint.textContent = 'BOM 上传成功，共 ' + totalCount + ' 个 BOM 表。';
+                    elements.bomUploadHint.textContent = 'BOM 上传成功，已识别 ' + totalCount + ' 个 BOM 表。请勾选需要生成的 BOM 表后点击“分析并生成报表”。';
                 } else {
                     elements.bomUploadHint.style.background = '#ecfeff';
                     elements.bomUploadHint.style.color = '#155e75';
@@ -2822,8 +2939,11 @@
                 }
             }
 
-            showStatus('BOM 上传成功，检测到 ' + data.sheet_count + ' 个工作表、' + (data.bom_table_count || 0) + ' 个 BOM 表。', 'success');
-            generateQuotation();
+            if (_bomGroup2 === '亚太组' && !isApGroundCase()) {
+                showStatus('BOM 上传成功，检测到 ' + data.sheet_count + ' 个工作表、' + (data.bom_table_count || 0) + ' 个 BOM 表。请选择要生成的 BOM 表后点击“分析并生成报表”。', 'success');
+            } else {
+                showStatus('BOM 上传成功，检测到 ' + data.sheet_count + ' 个工作表、' + (data.bom_table_count || 0) + ' 个 BOM 表。', 'success');
+            }
         } catch (error) {
             console.error('上传 BOM 失败:', error);
             showStatus('上传失败: ' + error.message, 'error');
@@ -2899,6 +3019,10 @@
         if (currentGroup) {
             formData.append('group', currentGroup);
         }
+        if (currentGroup === '亚太组') {
+            var apCaseTypeEl = document.querySelector('input[name="ap-case-type"]:checked');
+            formData.append('ap_case_type', apCaseTypeEl ? apCaseTypeEl.value : 'ROOF');
+        }
 
         try {
             var response = await fetch(KS_API_BASE_URL + '/upload-matrix', {
@@ -2917,8 +3041,14 @@
                     set_count: data.set_count,
                     array_rows: data.array_rows,
                     array_cols: data.array_cols,
-                    arrays: data.arrays || []
+                    arrays: data.arrays || [],
+                    module_wattage: data.module_wattage
                 };
+
+                var moduleWattageInput = document.getElementById('module-wattage-input');
+                if (moduleWattageInput && data.module_wattage) {
+                    moduleWattageInput.value = data.module_wattage;
+                }
 
                 resetReportState();
 
@@ -2961,6 +3091,11 @@
                 selected_bom_keys: selectedBomKeys,
                 group: typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '韩语组'
             };
+
+            var moduleWattageEl = document.getElementById('module-wattage-input');
+            if (moduleWattageEl && moduleWattageEl.value) {
+                requestBody.module_wattage = parseFloat(moduleWattageEl.value) || 0;
+            }
 
             var response = await fetch(KS_API_BASE_URL + '/analyze', {
                 method: 'POST',
@@ -3039,6 +3174,11 @@
                 contact_info: state.contactInfo,
                 group: typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '韩语组'
             };
+
+            var moduleWattageEl = document.getElementById('module-wattage-input');
+            if (moduleWattageEl && moduleWattageEl.value) {
+                requestBody.module_wattage = parseFloat(moduleWattageEl.value) || 0;
+            }
 
             var needWeightCodeEl = document.getElementById('need-weight-code');
             var enNeedWeightCodeEl = document.getElementById('en-need-weight-code');
@@ -3181,6 +3321,18 @@
                 if (jaDiscountEl) {
                     requestBody.discount_rate = parseFloat(jaDiscountEl.value) || 71;
                 }
+                var jaSteelDiscountEl = document.getElementById('ja-steel-discount-rate');
+                if (jaSteelDiscountEl) {
+                    requestBody.steel_discount_rate = parseFloat(jaSteelDiscountEl.value) || 84;
+                }
+                var jaPurchasedDiscountEl = document.getElementById('ja-purchased-discount-rate');
+                if (jaPurchasedDiscountEl) {
+                    requestBody.purchased_discount_rate = parseFloat(jaPurchasedDiscountEl.value) || 94;
+                }
+                var jaSteelPackEl = document.getElementById('ja-steel-pack');
+                if (jaSteelPackEl) {
+                    requestBody.steel_pack = jaSteelPackEl.value || 'jybz';
+                }
 
                 var truckSizeEl = document.getElementById('ja-truck-size');
                 var truckUnicEl = document.getElementById('ja-truck-unic');
@@ -3306,6 +3458,7 @@
                 var normalMitsumoriEl = document.querySelector('input[name="normal-mitsumori-condition"]:checked');
                 requestBody.normal_params = {
                     discount_rate: parseFloat((document.getElementById('normal-discount-rate') || {}).value) || 71,
+                    steel_pack: (document.getElementById('normal-steel-pack') || {}).value || 'jybz',
                     consumption_tax: parseFloat((document.getElementById('normal-consumption-tax') || {}).value) || 10,
                     tariff_rate: parseFloat((document.getElementById('normal-tariff-rate') || {}).value) || 3,
                     fence_discount_rate: parseFloat((document.getElementById('normal-fence-discount-rate') || {}).value) || 94,
@@ -3327,6 +3480,12 @@
                 }
             } else {
                 requestBody.case_type = 'EST';
+                var jaSteelDiscountRateEl = document.getElementById('ja-steel-discount-rate');
+                requestBody.steel_discount_rate = jaSteelDiscountRateEl ? parseFloat(jaSteelDiscountRateEl.value) || 84 : 84;
+                var jaPurchasedDiscountRateEl = document.getElementById('ja-purchased-discount-rate');
+                requestBody.purchased_discount_rate = jaPurchasedDiscountRateEl ? parseFloat(jaPurchasedDiscountRateEl.value) || 94 : 94;
+                var jaSteelPackEl = document.getElementById('ja-steel-pack');
+                requestBody.steel_pack = jaSteelPackEl ? jaSteelPackEl.value || 'jybz' : 'jybz';
             }
 
             if (currentGroup === '英语组') {
@@ -3443,8 +3602,36 @@
             }
 
             if (currentGroup === '亚太组') {
+                var apCaseTypeEl = document.querySelector('input[name="ap-case-type"]:checked');
+                requestBody.ap_case_type = apCaseTypeEl ? apCaseTypeEl.value : 'ROOF';
+
                 var apTradeMethodEl = document.querySelector('input[name="ap-trade-method"]:checked');
                 requestBody.trade_method = apTradeMethodEl ? apTradeMethodEl.value : 'EXW';
+
+                var apNeedFreight = ['FOB', 'CIF'].indexOf(requestBody.trade_method) >= 0;
+                if (apNeedFreight) {
+                    var apContainers = [];
+                    [['20GP', 'ap-ct-20gp', 'ap-qty-20gp', 'ap-freight-20gp'],
+                     ['40HQ', 'ap-ct-40hq', 'ap-qty-40hq', 'ap-freight-40hq']].forEach(function (cfg) {
+                        var cbEl = document.getElementById(cfg[1]);
+                        if (!cbEl || !cbEl.checked) return;
+                        var qtyEl = document.getElementById(cfg[2]);
+                        var frEl = document.getElementById(cfg[3]);
+                        var qty = qtyEl ? (parseInt(qtyEl.value, 10) || 0) : 0;
+                        var fr = frEl ? (parseFloat(frEl.value) || 0) : 0;
+                        if (qty > 0) {
+                            apContainers.push({ type: cfg[0], qty: qty, freight_per_unit: fr });
+                        }
+                    });
+                    requestBody.container_details = apContainers;
+                    requestBody.ap_freight = apContainers.reduce(function (s, c) {
+                        return s + c.qty * c.freight_per_unit;
+                    }, 0);
+                } else {
+                    requestBody.ap_freight = 0;
+                }
+                var apPortEl = document.getElementById('ap-port');
+                requestBody.dest_port = apPortEl ? apPortEl.value : 'XIAMEN';
 
                 var apDiscountRateEl = document.getElementById('ap-discount-rate');
                 requestBody.ap_discount_rate = apDiscountRateEl ? parseFloat(apDiscountRateEl.value) || 100 : 100;
@@ -4326,11 +4513,12 @@
         panel.style.height = '0';
         panel.style.border = 'none';
         panel.innerHTML =
-            '<div style="font-weight: 600; color: #0f172a;">匹配 BOM 表选择</div>' +
+            '<div style="font-weight: 600; color: #0f172a;">选择需要生成的 BOM 表</div>' +
             '<div id="bom-table-selection-summary" class="muted" style="margin-top: 6px;"></div>' +
             '<div class="toolbar" style="margin-top: 10px; gap: 8px;">' +
             '<button type="button" class="btn" id="bom-table-select-all-btn">全选</button>' +
             '<button type="button" class="btn" id="bom-table-clear-btn">清空</button>' +
+            '<button type="button" class="btn primary" id="bom-table-confirm-btn">确认生成</button>' +
             '</div>' +
             '<div id="bom-table-selection-list" style="margin-top: 10px; display: grid; gap: 8px;"></div>';
 
@@ -4358,6 +4546,17 @@
         elements.bomTableClearButton.addEventListener('click', function () {
             setAllBomTableSelection(false);
         });
+        elements.bomTableConfirmButton = panel.querySelector('#bom-table-confirm-btn');
+        if (elements.bomTableConfirmButton) {
+            elements.bomTableConfirmButton.addEventListener('click', function () {
+                var selected = getSelectedBomKeys();
+                if (Array.isArray(state.bomTables) && state.bomTables.length > 0 && selected.length === 0) {
+                    showStatus('请至少勾选一个 BOM 表。', 'error');
+                    return;
+                }
+                generateQuotation();
+            });
+        }
 
         return panel;
     }
@@ -4424,6 +4623,11 @@
     }
 
     function renderBomTableSelection() {
+        var currentGroup = typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '韩语组';
+        if (currentGroup !== '亚太组') {
+            return;
+        }
+
         var panel = ensureBomTableSelectionPanel();
         if (!panel || !elements.bomTableSelectionList) {
             return;
@@ -4474,11 +4678,13 @@
         }).join('');
 
         panel.style.display = 'block';
-        panel.style.height = '0';
-        panel.style.overflow = 'hidden';
-        panel.style.padding = '0';
-        panel.style.border = 'none';
-        panel.style.margin = '0';
+        panel.style.height = 'auto';
+        panel.style.overflow = 'visible';
+        panel.style.padding = '12px';
+        panel.style.border = '1px solid #dbeafe';
+        panel.style.borderRadius = '8px';
+        panel.style.background = '#ffffff';
+        panel.style.marginTop = '10px';
         syncSelectedBomKeysFromDom();
     }
 
@@ -4613,6 +4819,13 @@
         return selected;
     }
 
+    function isApGroundCase() {
+        var g = typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '韩语组';
+        if (g !== '亚太组') return false;
+        var el = document.querySelector('input[name="ap-case-type"]:checked');
+        return el ? el.value === 'GROUND' : false;
+    }
+
     function collectNvParams() {
         var nvTradeEl = document.querySelector('input[name="nv-trade-method"]:checked');
         var tradeVal = nvTradeEl ? nvTradeEl.value : 'CIF';
@@ -4692,6 +4905,9 @@
                 { key: 'ja_consumption_tax', type: 'num', id: 'ja-consumption-tax' },
                 { key: 'ja_fence_tax', type: 'num', id: 'ja-fence-tax' },
                 { key: 'ja_discount_rate', type: 'num', id: 'ja-discount-rate' },
+                { key: 'ja_steel_discount_rate', type: 'num', id: 'ja-steel-discount-rate' },
+                { key: 'ja_purchased_discount_rate', type: 'num', id: 'ja-purchased-discount-rate' },
+                { key: 'ja_steel_pack', type: 'text', id: 'ja-steel-pack' },
                 { key: 'ja_truck_size', type: 'text', id: 'ja-truck-size' },
                 { key: 'ja_truck_unic', type: 'check', id: 'ja-truck-unic' },
                 { key: 'ja_truck_flat', type: 'check', id: 'ja-truck-flat' },
@@ -4699,6 +4915,7 @@
             ],
             'NORMAL': [
                 { key: 'normal_discount_rate', type: 'num', id: 'normal-discount-rate' },
+                { key: 'normal_steel_pack', type: 'text', id: 'normal-steel-pack' },
                 { key: 'normal_consumption_tax', type: 'num', id: 'normal-consumption-tax' },
                 { key: 'normal_tariff_rate', type: 'num', id: 'normal-tariff-rate' },
                 { key: 'normal_fence_discount_rate', type: 'num', id: 'normal-fence-discount-rate' },
@@ -4746,6 +4963,8 @@
         ],
         '亚太组': [
             { key: 'ap_trade_method', type: 'radio', name: 'ap-trade-method', trigger: 'change' },
+            { key: 'ap_freight', type: 'num', id: 'ap-freight' },
+            { key: 'ap_port', type: 'text', id: 'ap-port' },
             { key: 'ap_company_discount', type: 'num', id: 'ap-company-discount', trigger: 'input' },
             { key: 'ap_commission', type: 'num', id: 'ap-commission', trigger: 'input' },
             { key: 'ap_steel_discount_rate', type: 'num', id: 'ap-steel-discount-rate' },
@@ -4988,7 +5207,7 @@
             var ev = _radioVal('en-case-type', 'COMMON');
             return ev === 'SIMPLE' ? 'en_simple' : 'en_common';
         }
-        if (g === '亚太组') return 'ap_common';
+        if (g === '亚太组') return _radioVal('ap-case-type', 'ROOF') === 'GROUND' ? 'ap_ground' : 'ap_common';
         return 'ko_normal';
     }
     function _getStoredPrint(caseKey) {
@@ -5104,9 +5323,17 @@
         var restore = document.getElementById('print-restore-btn');
         if (restore && !restore._bound) { restore._bound = true; restore.addEventListener('click', restorePrintDefault); }
         // 切换案件类型时刷新面板
-        ['ko-case-type', 'ja-case-type', 'en-case-type'].forEach(function (name) {
+        ['ko-case-type', 'ja-case-type', 'en-case-type', 'ap-case-type'].forEach(function (name) {
             document.querySelectorAll('input[name="' + name + '"]').forEach(function (r) {
                 if (!r._printBound) { r._printBound = true; r.addEventListener('change', refreshPrintPanel); }
+                if (name === 'ap-case-type' && !r._reorganizeBound) {
+                    r._reorganizeBound = true;
+                    r.addEventListener('change', function () {
+                        var infoCard = containerEl.querySelector('.quotation-subcard-info');
+                        if (infoCard) infoCard.style.display = isApGroundCase() ? '' : 'none';
+                        if (typeof updateApModuleWattageVisibility === 'function') updateApModuleWattageVisibility();
+                    });
+                }
             });
         });
     }

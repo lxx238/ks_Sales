@@ -96,6 +96,11 @@ CASE_DEFAULTS = {
         'horizontal_centered': False,
         'margin_top': 0.75, 'margin_bottom': 0.75, 'margin_left': 0.7, 'margin_right': 0.7,
     },
+    'ap_ground': {
+        'orientation': 'portrait', 'fit_mode': 'fit_width',
+        'horizontal_centered': False,
+        'margin_top': 0.5, 'margin_bottom': 0.5, 'margin_left': 0.4, 'margin_right': 0.4,
+    },
     'ja': {  # 旧版/通用日语引擎
         'orientation': 'portrait', 'fit_mode': 'fit_width',
         'horizontal_centered': False,

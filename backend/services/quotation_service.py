@@ -144,6 +144,7 @@ def generate_quotation_db_only(data):
         ko_case_type = data.get('ko_case_type', 'NORMAL')
         en_case_type = data.get('en_case_type', 'SIMPLE')
         en_lang = data.get('en_lang', 'en')
+        ap_case_type = data.get('ap_case_type', 'ROOF')
         _log_group = str(group or '')
         _log_case_type = ''
         need_weight_code = coerce_bool(data.get('need_weight_code'), default=False)
@@ -180,6 +181,8 @@ def generate_quotation_db_only(data):
         ap_discount_rate = data.get('ap_discount_rate', 100)
         ap_steel_discount_rate = data.get('ap_steel_discount_rate', 100)
         ap_purchased_discount_rate = data.get('ap_purchased_discount_rate', 100)
+        ap_freight = data.get('ap_freight', 0)
+        module_wattage = data.get('module_wattage')
         ko_tariff_rate = data.get('ko_tariff_rate', 1.6)
         ko_consumption_tax = data.get('ko_consumption_tax', 10)
         ko_freight = data.get('ko_freight', 0)
@@ -197,6 +200,8 @@ def generate_quotation_db_only(data):
             _log_case_type = str(case_type or '')
         elif group == '英语组':
             _log_case_type = str(en_case_type or '')
+        elif group == '亚太组':
+            _log_case_type = str(ap_case_type or '')
         else:
             _log_case_type = str(ko_case_type or '')
 
@@ -223,7 +228,9 @@ def generate_quotation_db_only(data):
                 return {'success': False, 'message': '阵列表文件不存在'}, 400
 
             log_generate(f'resolved matrix path: {matrix_file}')
-            matrix_data = extract_matrix_data(matrix_file, group=group)
+            matrix_data = extract_matrix_data(matrix_file, group=group, ap_case_type=ap_case_type)
+            if module_wattage is not None:
+                matrix_data['module_wattage'] = module_wattage
             matrix_applied = True
             log_generate(
                 'matrix parsed: '
@@ -241,6 +248,8 @@ def generate_quotation_db_only(data):
         en_bom_info_by_key = None
         en_span_info_by_key = None
         pre_parsed_bom_configs = None
+        ap_pre_parsed_products_by_key = None
+        ap_pre_parsed_bom_info_by_key = None
         if group == '日语组':
             from backend.core.ja_EST.quotation_builder import _build_products_by_key as ja_build
             from backend.core.statistics import build_bom_analysis
@@ -256,6 +265,10 @@ def generate_quotation_db_only(data):
             ja_kwargs['consumption_tax'] = consumption_tax
             ja_kwargs['fence_tax'] = fence_tax
             ja_kwargs['discount_rate'] = discount_rate
+            if case_type == 'EST':
+                ja_kwargs['steel_discount_rate'] = data.get('steel_discount_rate', 84)
+                ja_kwargs['purchased_discount_rate'] = data.get('purchased_discount_rate', 94)
+                ja_kwargs['steel_pack'] = str(data.get('steel_pack') or '').strip().lower() or 'jybz'
             ja_kwargs['exchange_rate'] = exchange_rate
             ja_kwargs['truck_desc'] = truck_desc
             ja_kwargs['truck_fee'] = truck_fee
@@ -364,11 +377,41 @@ def generate_quotation_db_only(data):
                     coating_thickness=coating_thickness,
                     load_images=False,
                     lazy_image_filter=True,
+                    module_wattage=module_wattage,
                 )
                 all_products, material_mapping, analysis = ctx[0], ctx[1], ctx[2]
                 ko_read_results_map = ctx[3] if len(ctx) > 3 else None
                 ko_bom_struct_meta = ctx[4] if len(ctx) > 4 else None
                 analysis['material_record_count'] = len({id(record) for record in material_mapping.values()})
+            elif group == '亚太组':
+                from backend.core.shared.bom_zip_parser import _build_products_by_key
+                from backend.core.statistics import build_bom_analysis
+                from backend.core.material_matcher import auto_register_missing_codes
+
+                _ap_col_map, _ap_skip_kw, _ap_non_bom_kw = get_bom_processing_rules()
+                _ap_sel_set = normalize_selected_bom_keys(selected_bom_keys)
+                (_ap_products_by_key, _ap_bom_info_by_key, _ap_xls, _ap_inv, _ap_bom_configs) = _build_products_by_key(
+                    bom_file, _ap_sel_set, _ap_col_map, _ap_skip_kw, _ap_non_bom_kw,
+                )
+                log_generate(f'ap parsed BOM keys ({len(_ap_products_by_key)}): {list(_ap_products_by_key.keys())[:8]}')
+
+                all_products = []
+                for _ap_prods in _ap_products_by_key.values():
+                    all_products.extend(_ap_prods)
+
+                material_codes = [p.get('code') for p in all_products]
+                material_mapping = fetch_material_mapping(material_codes, group=group, sale_type=sale_type, coating_thickness=coating_thickness)
+                newly_registered = auto_register_missing_codes(all_products, material_mapping)
+                if newly_registered:
+                    new_mapping = fetch_material_mapping(newly_registered, group=group, sale_type=sale_type, coating_thickness=coating_thickness)
+                    material_mapping.update(new_mapping)
+
+                analysis = build_bom_analysis(all_products, material_mapping)
+                analysis['material_record_count'] = len({id(record) for record in material_mapping.values()})
+                pre_parsed_bom_configs = _ap_bom_configs
+                if _ap_products_by_key and _ap_bom_info_by_key:
+                    ap_pre_parsed_products_by_key = _ap_products_by_key
+                    ap_pre_parsed_bom_info_by_key = _ap_bom_info_by_key
             else:
                 ctx = build_bom_material_context(
                     bom_file,
@@ -376,6 +419,7 @@ def generate_quotation_db_only(data):
                     group=group,
                     sale_type=sale_type,
                     coating_thickness=coating_thickness,
+                    module_wattage=module_wattage,
                 )
                 all_products, material_mapping, analysis = ctx[0], ctx[1], ctx[2]
                 if group == '韩语组' and len(ctx) > 3:
@@ -523,10 +567,23 @@ def generate_quotation_db_only(data):
             ap_kwargs['coating_thickness'] = coating_thickness
             ap_kwargs['delete_options'] = delete_options
             ap_kwargs['always_exclude_extra_items'] = True
-            ap_kwargs['bom_sheet_keyword'] = '屋顶'
             ap_kwargs['ap_discount_rate'] = ap_discount_rate
             ap_kwargs['ap_steel_discount_rate'] = ap_steel_discount_rate
             ap_kwargs['ap_purchased_discount_rate'] = ap_purchased_discount_rate
+            ap_kwargs['ap_freight'] = ap_freight
+            ap_kwargs['dest_port'] = data.get('dest_port', 'XIAMEN')
+            ap_kwargs['module_wattage'] = module_wattage
+            ap_kwargs['ap_case_type'] = ap_case_type
+            if str(ap_case_type or '').upper() == 'GROUND':
+                ap_kwargs['ap_exclude_options'] = data.get('ap_exclude_options') or {}
+                ap_kwargs['ap_special_discount_rate'] = data.get('ap_special_discount_rate', 100)
+                ap_kwargs['production_lead_time'] = data.get('production_lead_time', '30days after receiving deposit')
+                ap_kwargs['payment_term'] = data.get('payment_term', '30% T/T deposit, 70% balance before shipment')
+                ap_kwargs['container_details'] = data.get('container_details')
+                ap_kwargs['validity_days'] = data.get('validity_days', 7)
+            if ap_pre_parsed_products_by_key and ap_pre_parsed_bom_info_by_key:
+                ap_kwargs['pre_parsed_products_by_key'] = ap_pre_parsed_products_by_key
+                ap_kwargs['pre_parsed_bom_info_by_key'] = ap_pre_parsed_bom_info_by_key
 
         if group == '英语组':
             _bom_arr_count = len(en_products_by_key) if en_products_by_key else 0

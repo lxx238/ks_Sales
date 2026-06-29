@@ -516,7 +516,10 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
         if is_meter:
             length_mm = Decimal(str(extract_length_from_spec(product.get('spec')) or 0))
 
-        if is_meter and length_mm > 0:
+        # 临时询价来源：单价已是每件价，不再二次折算
+        if price_info and price_info.get('temp_inquiry'):
+            display_unit_price = unit_price
+        elif is_meter and length_mm > 0:
             display_unit_price = float(Decimal(str(unit_price)) * length_mm / Decimal('1000'))
         else:
             display_unit_price = unit_price
@@ -838,6 +841,8 @@ def create_nv_detail_sheet(workbook, array_info, bom_products, price_mapping,
                     length_mm = float(_m.group(1))
             if not pile_is_matched:
                 display_unit_price = ''
+            elif price_info and price_info.get('temp_inquiry'):
+                display_unit_price = unit_price
             elif pricing_unit == '米' and length_mm > 0:
                 display_unit_price = (length_mm / 1000) * unit_price
             elif pricing_unit == '米' and length_mm <= 0:
@@ -1147,7 +1152,7 @@ def _create_fence_detail_sheet(workbook, fence_rows, gate_rows, nv_fgg,
             foundation_type = '杭基礎'
 
         _NV_GATE_TYPE_LABELS = {
-            '片開き門扉', '両開き門扉', '引き戸扉', '折りたたみ扉', '伸縮門扉',
+            '片開き扉', '両開き扉', '引き戸扉', '折りたたみ扉', '伸縮扉',
         }
 
         if prefix.lower().startswith('tl'):
@@ -1163,7 +1168,7 @@ def _create_fence_detail_sheet(workbook, fence_rows, gate_rows, nv_fgg,
         elif width_code == '120':
             single_gate_qty = gate_qty_val
             if gate_qty_val > 0:
-                gate_type_label = '片開き門扉'
+                gate_type_label = '片開き扉'
         else:
             double_gate_qty = gate_qty_val
             db_h_fd, db_w_fd = _lookup_gate_spec_from_db(gate_style_code)
@@ -1175,7 +1180,7 @@ def _create_fence_detail_sheet(workbook, fence_rows, gate_rows, nv_fgg,
                 except (ValueError, TypeError):
                     double_gate_width = 4200
             if gate_qty_val > 0:
-                gate_type_label = '両開き門扉'
+                gate_type_label = '両開き扉'
 
     ws.merge_cells('G1:H1')
     ws['G1'] = '見積日：'
@@ -1209,8 +1214,8 @@ def _create_fence_detail_sheet(workbook, fence_rows, gate_rows, nv_fgg,
         f'1.ディップコーディング　{surface_jp}\n'
         f'2.{foundation_type}\n'
         f'3.H={_height_m}m　L={int(fence_len)}ｍ\n'
-        f'4.片開き門扉幅W1200　{single_gate_qty}ヶ所\n'
-        f'5.両開き門扉幅W4200　{double_gate_qty}ヶ所\n'
+        f'4.片開き扉幅W1200　{single_gate_qty}ヶ所\n'
+        f'5.両開き扉幅W4200　{double_gate_qty}ヶ所\n'
         f'6.柱材コーナー部　{corner_qty}箇所\n'
         f'（0枚予備）'
     )
@@ -1462,6 +1467,7 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
     consumption_tax_pct = nv_params.get('consumption_tax', 10)
     tariff_rate_pct = nv_params.get('tariff_rate', 3)
     mitsumori_condition = nv_params.get('mitsumori_condition', 'CIF')
+    is_nv = (mitsumori_condition == 'NV')
     _show_cif = mitsumori_condition in ('CIF', 'CIF_DDP', 'NV')
     _show_ddp = mitsumori_condition in ('DDP', 'CIF_DDP', 'NV')
     is_cif = _show_cif
@@ -1512,6 +1518,8 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
     }
     for col, width in NV_SUMMARY_WIDTHS.items():
         ws.column_dimensions[col].width = width
+    if is_nv:
+        ws.column_dimensions['C'].width = 12.5
 
     center = CENTER
     right_a = RIGHT_A
@@ -2265,9 +2273,9 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
                         elif g_prefix.startswith('tf'):
                             gate_type_label = '折りたたみ扉'
                         elif g_style[3:6] != '120':
-                            gate_type_label = '両開き門'
+                            gate_type_label = '両開き扉'
                         else:
-                            gate_type_label = '片開き門'
+                            gate_type_label = '片開き扉'
         elif nv_fgg:
             fence_section = nv_fgg.get('fence') or {}
             gate_section = nv_fgg.get('gate') or {}
@@ -2303,9 +2311,9 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
                 elif g_prefix.startswith('tf'):
                     gate_type_label = '折りたたみ扉'
                 elif g_style[3:6] != '120':
-                    gate_type_label = '両開き門'
+                    gate_type_label = '両開き扉'
                 else:
-                    gate_type_label = '片開き門'
+                    gate_type_label = '片開き扉'
 
     all_fence_items = detail_fence_rows + detail_gate_rows
     fence_only_amount = Decimal(str(sum(r.get('amount', 0) for r in detail_fence_rows)))
@@ -2336,6 +2344,7 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
             _fence_base_type = 'コンクリート基礎'
         elif 'CP' in _first_fence_style:
             _fence_base_type = '一本打ち込み式'
+        _fence_mesh_type = _extract_fence_mesh_type_from_style(_first_fence_style)
         fence_title_text = f'{_get_cjk_num(_fence_sec_num)}、フェンス金額 （{_fence_base_type} ' + ' '.join(fence_desc_parts) + '）'
 
         ws.merge_cells(f'A{r_fence_title}:M{r_fence_title}')
@@ -2378,7 +2387,10 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
                 _mesh_type = _extract_fence_mesh_type_from_style(fence_section_info.get('style', ''))
                 fence_spec = f'H{fence_h_val}*W2000'
                 if _mesh_type:
-                    fence_spec = f'H{fence_h_val}*W2000\n{_mesh_type}mm'
+                    if is_nv:
+                        fence_spec = f'H{fence_h_val}*W2000\n網{_mesh_type}mm、 φ4.2㎜'
+                    else:
+                        fence_spec = f'H{fence_h_val}*W2000\n{_mesh_type}mm'
 
                 _s(row, 1, seq)
                 _s(row, 2, fence_name, align=Alignment(horizontal='center', vertical='center', wrap_text=True))
@@ -2392,7 +2404,7 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
                 _s(row, 10, round(fence_unit, 2))
                 ws.cell(row=row, column=10).number_format = NUM_FMT
                 _s(row, 11, fence_qty)
-                ws.cell(row=row, column=11).number_format = '0.00'
+                ws.cell(row=row, column=11).number_format = '0' if is_nv else '0.00'
                 ws.cell(row=row, column=12, value=f'=K{row}*J{row}').font = SM_FONT
                 ws.cell(row=row, column=12).alignment = center
                 ws.cell(row=row, column=12).border = THIN_BORDER
@@ -2419,7 +2431,7 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
                 g_amount = float(sum(r.get('amount', 0) or 0 for r in g_rows))
                 g_unit = g_amount / g_qty if g_qty > 0 else 0
 
-                gate_name = '片開き門'
+                gate_name = '片開き扉'
                 w_label = 'W1200'
                 g_prefix_lower = g_style[:3].lower()
                 if g_prefix_lower.startswith('tl'):
@@ -2431,13 +2443,13 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
                     w_code = g_style[3:6]
                     w_label = f'W{int(w_code) * 10}' if w_code.isdigit() else 'W2400'
                 elif g_style.startswith('td'):
-                    gate_name = '両開き門'
+                    gate_name = '両開き扉'
                     if '420' in g_style:
                         w_label = 'W4200'
                     else:
                         w_label = 'W2400'
                 elif g_style.startswith('ts'):
-                    gate_name = '片開き門'
+                    gate_name = '片開き扉'
                     w_label = 'W1200'
 
                 gate_material = f'スチールQ235B\n表面：{coating_jp}'
@@ -2447,6 +2459,9 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
                 else:
                     gate_h_val = fence_height_mm or '1500'
                     gate_spec = f'H{gate_h_val}*{w_label}'
+                _gate_mesh = _fence_mesh_type
+                if is_nv and _gate_mesh:
+                    gate_spec = f'{gate_spec}\n網{_gate_mesh}mm、 φ4.2㎜'
 
                 _s(row, 1, seq)
                 _s(row, 2, gate_name, align=Alignment(horizontal='center', vertical='center', wrap_text=True))
@@ -2488,6 +2503,9 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
             else:
                 gate_h_val = fence_height_mm or '1500'
                 gate_spec = f'H{gate_h_val}*{w_label}'
+            _gate_mesh = _fence_mesh_type
+            if is_nv and _gate_mesh:
+                gate_spec = f'{gate_spec}\n網{_gate_mesh}mm、 φ4.2㎜'
 
             _s(row, 1, seq)
             _s(row, 2, gate_name, align=Alignment(horizontal='center', vertical='center', wrap_text=True))
@@ -2583,6 +2601,8 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
             r_d = r_ocean_data_start + ci
             ws.row_dimensions[r_d].height = 20
             ct_type = ct_info.get('type', '混載便')
+            if is_nv and str(ct_type).strip().upper() == 'LCL':
+                ct_type = '混載便'
             ct_qty = int(ct_info.get('qty', 1))
             ct_freight = float(ct_info.get('freight', 0))
             if ct_freight <= 0 and ct_qty <= 0:
@@ -2711,7 +2731,11 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
         ws.cell(row=r_truck, column=2).border = THIN_BORDER
         ws.cell(row=r_truck, column=2).alignment = center
         ws.merge_cells(f'B{r_truck}:K{r_truck}')
-        ws.cell(row=r_truck, column=12, value=truck_fee).font = SM_FONT_BOLD
+        if is_nv and r_ocean_total is not None:
+            _truck_val = f'={truck_fee}-L{r_ocean_total}'
+        else:
+            _truck_val = truck_fee
+        ws.cell(row=r_truck, column=12, value=_truck_val).font = SM_FONT_BOLD
         ws.cell(row=r_truck, column=12).alignment = center
         ws.cell(row=r_truck, column=12).border = THIN_BORDER
         ws.cell(row=r_truck, column=12).number_format = NUM_FMT
@@ -2728,9 +2752,13 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
         ws.merge_cells(f'B{r_tax}:K{r_tax}')
         _bp_base = f'L{r_bp_total}'
         _fence_part = f'+L{r_fence_disc}' if all_fence_items else ''
+        _ocean_part = f'+L{r_ocean_total}' if (is_nv and r_ocean_total is not None) else ''
         _ct_rate = round(consumption_tax_pct / 100, 4)
         _tr_rate = round(tariff_rate_pct / 100, 4)
-        tax_formula = f'=({_bp_base}{_fence_part})*{_ct_rate}+({_bp_base})*{_tr_rate}'
+        if is_nv:
+            tax_formula = f'=({_bp_base}{_fence_part}{_ocean_part})*{_ct_rate}+({_bp_base}{_ocean_part})*{_tr_rate}'
+        else:
+            tax_formula = f'=({_bp_base}{_fence_part})*{_ct_rate}+({_bp_base})*{_tr_rate}'
         ws.cell(row=r_tax, column=12, value=tax_formula).font = SM_FONT_BOLD
         ws.cell(row=r_tax, column=12).alignment = center
         ws.cell(row=r_tax, column=12).border = THIN_BORDER
@@ -2847,7 +2875,8 @@ def create_nv_summary_sheet(workbook, detail_results, matrix_data=None,
         ws.cell(row=total_amount_cell_r, column=3, value=f'=L{r_cif_val}').font = _FONT_12_BOLD
         ws.cell(row=total_amount_cell_r, column=3).alignment = _bottom_center
         ws.cell(row=total_amount_cell_r, column=3).number_format = '"US$" #,##0'
-    ws.cell(row=kw_price_cell_r, column=3, value=f'=C{total_amount_cell_r}/I{r_btotal}').font = _FONT_12_BOLD
+    _KW_FONT = Font(name='Yu Gothic UI', size=11.5, bold=True) if is_nv else _FONT_12_BOLD
+    ws.cell(row=kw_price_cell_r, column=3, value=f'=C{total_amount_cell_r}/I{r_btotal}').font = _KW_FONT
     ws.cell(row=kw_price_cell_r, column=3).alignment = _bottom_center
     if need_jpy_quote and r_jpy is not None:
         ws.cell(row=kw_price_cell_r, column=3).number_format = '"JPY" #,##0'
@@ -3135,7 +3164,8 @@ def create_spare_parts_sheet(workbook, spare_products, price_mapping,
         if price_info and has_valid_price_info(price_info):
             display_unit_price = get_temp_base_price(price_info, product, '日语组', 'export')
             pricing_unit = price_info.get('unit', '')
-            if pricing_unit == '米':
+            # 临时询价来源：单价已是每件价，不再二次折算
+            if not (price_info and price_info.get('temp_inquiry')) and pricing_unit == '米':
                 length_mm = float(product.get('length', 0) or 0)
                 if not length_mm:
                     length_mm = float(extract_length_from_spec(product.get('spec', '')) or 0)

@@ -195,7 +195,9 @@ def _classify_products(all_products, price_mapping, delete_options=None,
 def _calc_base_display_price(product, price_mapping, group, sale_type):
     """基础单价(长度折算后) → 展示单价（直接取数据库价格，无汇率换算）。"""
     code = product.get('code', '')
-    price_info = resolve_price_info(price_mapping, code, spec=product.get('spec', ''))
+    price_info = product.get('_price_info')
+    if not price_info:
+        price_info = resolve_price_info(price_mapping, code, spec=product.get('spec', ''))
     if not price_info or not has_valid_price_info(price_info):
         return 0.0, '', price_info
     base_price = float(get_temp_base_price(price_info, product, group, sale_type))
@@ -213,7 +215,7 @@ def collect_ap_array(df, price_mapping, config=None, matrix_data=None,
                      pre_parsed_products=None, sale_type='export',
                      coating_thickness=10, delete_options=None,
                      always_exclude_extra_items=False, ap_exclude_options=None,
-                     unmatched_products_list=None, **kwargs):
+                     unmatched_products_list=None, module_wattage=None, **kwargs):
     """收集单个阵列/站点的产品与站点信息（不渲染）。
 
     返回：
@@ -236,6 +238,12 @@ def collect_ap_array(df, price_mapping, config=None, matrix_data=None,
     if not isinstance(set_count, int) or set_count <= 0:
         set_count = 1
     output_kw = matrix_data.get('output_kw') or 0
+    # 若矩阵数据未提供功率，且配置/前端提供单瓦功率，则按 Row*Col*Tables*watt/1000 计算
+    if not output_kw and module_wattage and rows and cols:
+        try:
+            output_kw = float(rows) * float(cols) * float(set_count) * float(module_wattage) / 1000.0
+        except (TypeError, ValueError):
+            output_kw = 0
     project_name = str(matrix_data.get('project_name') or '').strip()
 
     render_products = main_products + excluded_products
@@ -280,6 +288,7 @@ def collect_ap_array(df, price_mapping, config=None, matrix_data=None,
 
         qty_total = float(quantity or 0) * set_count
         discount_cat = _get_discount_category(price_info, product)
+        unit_weight = product.get('weight') or 0
         items.append({
             'code': code,
             'name': en_name,
@@ -290,6 +299,7 @@ def collect_ap_array(df, price_mapping, config=None, matrix_data=None,
             'qty_total': qty_total,
             'is_matched': is_matched,
             'discount_cat': discount_cat,
+            'unit_weight': unit_weight,
         })
 
     pile_scaled = []
@@ -340,6 +350,7 @@ def create_ap_quotation_sheet(
         image_path=None, image_folder=None, code_to_images=None,
         image_temp_dir=None, image_cache=None,
         ap_discount_rate=100, ap_steel_discount_rate=100, ap_purchased_discount_rate=100,
+        ap_freight=0, dest_port='XIAMEN', module_wattage=None,
 ):
     """创建单页完整报价工作表（Part1 + Part2 + 合计 + 条款 + 银行信息）。"""
     matrix_data = matrix_data or {}
@@ -399,7 +410,7 @@ def create_ap_quotation_sheet(
 
     column_widths = {
         'A': 13, 'B': 21, 'C': 15, 'D': 24, 'E': 18, 'F': 18,
-        'G': 18, 'H': 18, 'I': 18, 'J': 18, 'K': 10,
+        'G': 18, 'H': 18, 'I': 18, 'J': 18, 'K': 13,
     }
     for col, width in column_widths.items():
         ws.column_dimensions[col].width = width
@@ -459,13 +470,10 @@ def create_ap_quotation_sheet(
 
     # 站点数据行（每个阵列一行）
     sites_kw_sum = 0.0
+    site_start_row = cur
+    site_rows = []
     for idx, site in enumerate(sites):
         ws.row_dimensions[cur].height = 65
-        site_kw = site.get('kw') or 0
-        try:
-            sites_kw_sum += float(site_kw)
-        except (TypeError, ValueError):
-            pass
         site_name = site.get('project') or site.get('name') or project_name or ''
         for c in range(1, max_col + 1):
             _set_cell(ws, cur, c, None, font=normal_font, align=center, border=_edge_border(c))
@@ -476,7 +484,13 @@ def create_ap_quotation_sheet(
         _set_cell(ws, cur, 5, site.get('rows') or '', font=normal_font, align=center, border=thin_border)
         _set_cell(ws, cur, 6, site.get('cols') or '', font=normal_font, align=center, border=thin_border)
         _set_cell(ws, cur, 7, site.get('tables') or '', font=normal_font, align=center, border=thin_border)
-        _set_cell(ws, cur, 8, site_kw or '', font=normal_font, align=center, border=thin_border)
+        # Total Capacity(kw) 使用公式：Row * Column * Tables * module_wattage / 1000
+        if module_wattage and site.get('rows') and site.get('cols') and site.get('tables'):
+            _set_cell(ws, cur, 8, f'=E{cur}*F{cur}*G{cur}*{module_wattage}/1000',
+                      font=normal_font, align=center, border=thin_border, number_format='0.000')
+        else:
+            _set_cell(ws, cur, 8, site.get('kw') or '', font=normal_font, align=center, border=thin_border)
+        site_rows.append(cur)
         cur += 1
 
     # Total Project Capacity(kw)（字体加粗；标签合并 B-G）
@@ -485,9 +499,15 @@ def create_ap_quotation_sheet(
         _set_cell(ws, cur, c, None, font=bold_font, align=center, border=_edge_border(c))
     ws.merge_cells(f'B{cur}:G{cur}')
     ws.merge_cells(f'H{cur}:J{cur}')
-    total_cap = output_kw if output_kw else (sites_kw_sum if sites_kw_sum else '')
+    if site_rows:
+        total_cap_formula = '=' + '+'.join([f'H{r}' for r in site_rows])
+        _set_cell(ws, cur, 8, total_cap_formula,
+                  font=bold_font, align=center, border=thin_border, number_format='0.000')
+    elif output_kw:
+        _set_cell(ws, cur, 8, output_kw, font=bold_font, align=center, border=thin_border, number_format='0.000')
+    else:
+        _set_cell(ws, cur, 8, '', font=bold_font, align=center, border=thin_border)
     _set_cell(ws, cur, 2, 'Total Project Capacity(kw)', font=bold_font, align=right_a, border=thin_border)
-    _set_cell(ws, cur, 8, total_cap, font=bold_font, align=center, border=thin_border)
     cur += 2
 
     # ---- Part 2 - Bill of Material（不填充绿色，字体加粗）----
@@ -534,7 +554,15 @@ def create_ap_quotation_sheet(
             _set_cell(ws, row, c, None, font=normal_font, align=center, border=bottom_border)
 
         _set_cell(ws, row, 1, idx + 1, font=normal_font, align=center, border=bottom_border)
-        _set_cell(ws, row, 2, item['name'], font=normal_font, align=center, border=bottom_border)
+        _name_val = item['name']
+        _unit_weight = item.get('unit_weight') or 0
+        if _unit_weight:
+            try:
+                _w = float(_unit_weight)
+                _name_val = f"{_name_val}\n{_w:.3f}KG"
+            except (TypeError, ValueError):
+                pass
+        _set_cell(ws, row, 2, _name_val, font=normal_font, align=center, border=bottom_border)
         _set_cell(ws, row, 3, '', font=normal_font, align=center, border=bottom_border)  # Picture
         _set_cell(ws, row, 4, item['material'], font=normal_font, align=center, border=bottom_border)
         _set_cell(ws, row, 5, _strip_cjk_spec(item['spec']), font=normal_font, align=center, border=bottom_border)
@@ -562,10 +590,11 @@ def create_ap_quotation_sheet(
 
     data_end = data_start + len(aggregated_items) - 1 if aggregated_items else data_start - 1
 
-    # ---- 合计：EXW Xiamen Total Amount（不填充颜色、无边缘框）----
+    # ---- 合计（不填充颜色、无边缘框）----
     cur = data_end + 1
+    port_label = str(dest_port or 'Xiamen').upper()
     ws.merge_cells(f'A{cur}:I{cur}')
-    _set_cell(ws, cur, 1, f'{trade_method} Xiamen Total Amount :', font=total_font, align=right_a)
+    _set_cell(ws, cur, 1, f'EXW {port_label} Total Amount :', font=total_font, align=right_a)
     if data_start <= data_end:
         _set_cell(ws, cur, 10, f'=SUM(J{data_start}:J{data_end})',
                   font=total_font, align=center, number_format=CURRENCY_FMT)
@@ -575,6 +604,29 @@ def create_ap_quotation_sheet(
     ws.row_dimensions[cur].height = 21
     sub_total_val = float(sub_total)
 
+    # ---- Freight / Total（FOB/CIF 显示）----
+    if trade_method in ('FOB', 'CIF'):
+        port_name = str(dest_port or 'Xiamen').title()
+        cur += 1
+        ws.merge_cells(f'A{cur}:I{cur}')
+        if trade_method == 'FOB':
+            _set_cell(ws, cur, 1, f'FOB {port_name} Port shipping cost:', font=total_font, align=right_a)
+        else:
+            _set_cell(ws, cur, 1, 'CIF shipping cost:', font=total_font, align=right_a)
+        _set_cell(ws, cur, 10, float(ap_freight or 0),
+                  font=total_font, align=center, number_format=CURRENCY_FMT)
+        cur += 1
+        ws.merge_cells(f'A{cur}:I{cur}')
+        if trade_method == 'FOB':
+            _set_cell(ws, cur, 1, f'FOB {port_name} Port Total Amount', font=total_font, align=right_a)
+        else:
+            _set_cell(ws, cur, 1, 'CIF Total Amount', font=total_font, align=right_a)
+        _set_cell(ws, cur, 10, f'=J{total_row}+J{cur-1}',
+                  font=total_font, align=center, number_format=CURRENCY_FMT)
+        total_row = cur
+        ws.row_dimensions[cur].height = 21
+        sub_total_val += float(ap_freight or 0)
+
     # ---- TERMS & CONDITIONS（每行合并 A~K，左对齐）----
     cur += 2
     ws.merge_cells(f'A{cur}:{max_col_letter}{cur}')
@@ -583,7 +635,7 @@ def create_ap_quotation_sheet(
         ws.cell(row=cur, column=_c).border = bottom_border
     cur += 1
     terms = [
-        f'1.Price Term：{trade_method}',
+        f'1.Price Term：{trade_method}' + (f' {dest_port}' if trade_method in ('FOB', 'CIF') and dest_port else ''),
         '2.Payment Term:30% T/T deposit, 70% balance before shipment',
         '3.Guarantee: 10 years warranty, 20 years service life',
         '4.Delivery time：3-4 Weeks after receiving deposit',
@@ -607,6 +659,8 @@ def create_ap_quotation_sheet(
     last_content_row = cur
 
     # ---- 图片插入（保持原始比例，不变形）----
+    from time import perf_counter as _pc
+    _t_img = _pc()
     image_found_count = 0
     image_not_found_count = 0
 
@@ -663,6 +717,7 @@ def create_ap_quotation_sheet(
             image_not_found_count += 1
             _mark_missing_image(row)
     print(f"   [AP] Images: found={image_found_count}, not_found={image_not_found_count}")
+    print(f"[AP-TIME] image loop: {_pc() - _t_img:.2f}s (rows={data_end - data_start + 1})")
 
     _apply_outer_frame(1, last_content_row)
 
