@@ -448,9 +448,10 @@ def generate_quotation_db_only(data):
         temp_pricing_matched = []
 
         # 日语/韩语区：案件内含「预装」料时，全部改用「铁托」吨价计价
+        # 注：BOM 中「预装」为留空(默认预装)、「不预装」才有值，故按归一化语义判定
         if group in ('日语组', '韩语组') and all_products:
             from backend.core.shared.product_utils import normalize_preinstall as _norm_pre
-            if any(_norm_pre(p.get('preinstall')) != '非预装' for p in all_products if p.get('preinstall')):
+            if any(_norm_pre(p.get('preinstall')) != '非预装' for p in all_products):
                 if steel_pack != 'tietuo':
                     log_generate('案件含预装料，吨价包装自动切换为「铁托(tietuo)」')
                     steel_pack = 'tietuo'
@@ -585,11 +586,15 @@ def generate_quotation_db_only(data):
             ap_kwargs['dest_port'] = data.get('dest_port', 'XIAMEN')
             ap_kwargs['module_wattage'] = module_wattage
             ap_kwargs['ap_case_type'] = ap_case_type
-            if str(ap_case_type or '').upper() == 'GROUND':
+            if str(ap_case_type or '').upper() in ('GROUND', 'GROUND_NO_DISCOUNT'):
                 ap_kwargs['ap_exclude_options'] = data.get('ap_exclude_options') or {}
                 ap_kwargs['ap_special_discount_rate'] = data.get('ap_special_discount_rate', 100)
-                ap_kwargs['production_lead_time'] = data.get('production_lead_time', '30days after receiving deposit')
-                ap_kwargs['payment_term'] = data.get('payment_term', '30% T/T deposit, 70% balance before shipment')
+                if str(ap_case_type or '').upper() == 'GROUND_NO_DISCOUNT':
+                    ap_kwargs['production_lead_time'] = data.get('production_lead_time', '4-6 Weeks after receiving deposit')
+                    ap_kwargs['payment_term'] = data.get('payment_term', 'T/T 30% deposit,70% balance before shipping')
+                else:
+                    ap_kwargs['production_lead_time'] = data.get('production_lead_time', '30days after receiving deposit')
+                    ap_kwargs['payment_term'] = data.get('payment_term', '30% T/T deposit, 70% balance before shipment')
                 ap_kwargs['container_details'] = data.get('container_details')
                 ap_kwargs['validity_days'] = data.get('validity_days', 7)
             if ap_pre_parsed_products_by_key and ap_pre_parsed_bom_info_by_key:

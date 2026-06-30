@@ -120,11 +120,15 @@
       <span style="font-weight: 600;">案件类型：</span>
       <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
         <input type="radio" name="ap-case-type" value="ROOF" checked style="width: 16px; height: 16px;">
-        <span>屋顶</span>
+        <span>屋顶分销模板</span>
       </label>
       <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
         <input type="radio" name="ap-case-type" value="GROUND" style="width: 16px; height: 16px;">
-        <span>地面</span>
+        <span>地面模板--有折扣</span>
+      </label>
+      <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+        <input type="radio" name="ap-case-type" value="GROUND_NO_DISCOUNT" style="width: 16px; height: 16px;">
+        <span>地面模板--无折扣</span>
       </label>
     </div>
   </div>
@@ -880,10 +884,15 @@
             <option value="TIANJIN">天津</option>
           </select>
         </div>
+        <div id="ap-dest-port-row" style="display: none; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-top: 8px;">
+          <span style="width: 120px;">目的港</span>
+          <input type="text" id="ap-dest-port" value="JEDDAH" placeholder="如：JEDDAH" style="width: 160px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+        </div>
         <div id="ap-module-wattage-row" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-top: 8px;">
           <span style="width: 120px;">单瓦功率(W)</span>
           <input type="number" id="module-wattage-input" value="670" step="1" min="0" placeholder="例如：670" style="width: 90px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
         </div>
+        <div id="ap-discount-section">
         <div style="font-size: 13px; color: var(--text); margin-bottom: 6px; font-weight: 600;">折扣率设置</div>
         <div style="display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text); margin-bottom: 4px;">
           <div style="display: flex; align-items: center; gap: 4px;">
@@ -913,6 +922,7 @@
         <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); margin-bottom: 4px;">
           <span style="width: 120px;">外购件折扣(%)</span>
           <input type="number" id="ap-purchased-discount-rate" value="94" step="1" min="0" max="100" style="width: 80px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+        </div>
         </div>
       </div>
       <div class="form-row" id="weight-code-row" data-group-only="日语组,韩语组" style="margin-top: 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
@@ -2366,6 +2376,10 @@
             var needFreight = ['FOB', 'CIF'].indexOf(method) >= 0;
             var containerRow = document.getElementById('ap-container-row');
             var portRow = document.getElementById('ap-port-row');
+            var destPortRow = document.getElementById('ap-dest-port-row');
+            var isNoDisc = false;
+            var _ndEl = document.querySelector('input[name="ap-case-type"]:checked');
+            if (_ndEl && _ndEl.value === 'GROUND_NO_DISCOUNT') isNoDisc = true;
             // 柜型/运费仅地面案件且 FOB/CIF 时显示
             if (containerRow) {
                 containerRow.style.display = (isApGroundCase() && needFreight) ? 'block' : 'none';
@@ -2374,8 +2388,15 @@
             if (apFreightRow) {
                 apFreightRow.style.display = (!isApGroundCase() && needFreight) ? 'flex' : 'none';
             }
+            // 港口/目的港显隐：
+            // - 地面模板--无折扣 → 「目的港」(文本输入)
+            // - 屋顶分销模板 / 地面模板--有折扣 → 「港口」(下拉选择)
+            var _portVisible = ['EXW', 'FOB', 'CIF'].indexOf(method) >= 0;
             if (portRow) {
-                portRow.style.display = ['EXW', 'FOB', 'CIF'].indexOf(method) >= 0 ? 'flex' : 'none';
+                portRow.style.display = (!isNoDisc && _portVisible) ? 'flex' : 'none';
+            }
+            if (destPortRow) {
+                destPortRow.style.display = (isNoDisc && _portVisible) ? 'flex' : 'none';
             }
             updateApModuleWattageVisibility();
         }
@@ -2439,6 +2460,11 @@
 
         var apTradeRadios = document.querySelectorAll('input[name="ap-trade-method"]');
         apTradeRadios.forEach(function (r) {
+            r.addEventListener('change', updateApTradeVisibility);
+        });
+        // 案件类型变更同样触发港口/目的港联动（案件类型优先级高于贸易方式）
+        var apCaseRadios = document.querySelectorAll('input[name="ap-case-type"]');
+        apCaseRadios.forEach(function (r) {
             r.addEventListener('change', updateApTradeVisibility);
         });
         ['ap-ct-20gp', 'ap-ct-40hq'].forEach(function (id) {
@@ -3617,7 +3643,7 @@
                 requestBody.trade_method = apTradeMethodEl ? apTradeMethodEl.value : 'EXW';
 
                 var apNeedFreight = ['FOB', 'CIF'].indexOf(requestBody.trade_method) >= 0;
-                if (apNeedFreight && requestBody.ap_case_type === 'GROUND') {
+                if (apNeedFreight && (requestBody.ap_case_type === 'GROUND' || requestBody.ap_case_type === 'GROUND_NO_DISCOUNT')) {
                     var apContainers = [];
                     [['20GP', 'ap-ct-20gp', 'ap-qty-20gp', 'ap-freight-20gp'],
                      ['40HQ', 'ap-ct-40hq', 'ap-qty-40hq', 'ap-freight-40hq']].forEach(function (cfg) {
@@ -3641,8 +3667,14 @@
                 } else {
                     requestBody.ap_freight = 0;
                 }
+                var _isNoDiscPort = requestBody.ap_case_type === 'GROUND_NO_DISCOUNT';
+                var apDestPortEl = document.getElementById('ap-dest-port');
                 var apPortEl = document.getElementById('ap-port');
-                requestBody.dest_port = apPortEl ? apPortEl.value : 'XIAMEN';
+                if (_isNoDiscPort) {
+                    requestBody.dest_port = apDestPortEl ? (apDestPortEl.value.trim() || 'JEDDAH') : 'JEDDAH';
+                } else {
+                    requestBody.dest_port = apPortEl ? apPortEl.value : 'XIAMEN';
+                }
 
                 var apDiscountRateEl = document.getElementById('ap-discount-rate');
                 requestBody.ap_discount_rate = apDiscountRateEl ? parseFloat(apDiscountRateEl.value) || 100 : 100;
@@ -4834,7 +4866,8 @@
         var g = typeof KSRouter !== 'undefined' ? KSRouter.getGroup() : '韩语组';
         if (g !== '亚太组') return false;
         var el = document.querySelector('input[name="ap-case-type"]:checked');
-        return el ? el.value === 'GROUND' : false;
+        if (!el) return false;
+        return el.value === 'GROUND' || el.value === 'GROUND_NO_DISCOUNT';
     }
 
     function collectNvParams() {
@@ -4976,6 +5009,7 @@
             { key: 'ap_trade_method', type: 'radio', name: 'ap-trade-method', trigger: 'change' },
             { key: 'ap_freight', type: 'num', id: 'ap-freight' },
             { key: 'ap_port', type: 'text', id: 'ap-port' },
+            { key: 'ap_dest_port', type: 'text', id: 'ap-dest-port' },
             { key: 'ap_company_discount', type: 'num', id: 'ap-company-discount', trigger: 'input' },
             { key: 'ap_commission', type: 'num', id: 'ap-commission', trigger: 'input' },
             { key: 'ap_steel_discount_rate', type: 'num', id: 'ap-steel-discount-rate' },
@@ -5120,6 +5154,15 @@
                 _applyOne(f, sub[f.key]);
             }
         });
+        // 偏好恢复后同步亚太港口/目的港与折扣区块显隐
+        if (info.group === '亚太组') {
+            if (typeof updateApTradeVisibility === 'function') updateApTradeVisibility();
+            var _apDiscAfter = document.getElementById('ap-discount-section');
+            if (_apDiscAfter) {
+                var _ndAfter = document.querySelector('input[name="ap-case-type"]:checked');
+                _apDiscAfter.style.display = (_ndAfter && _ndAfter.value === 'GROUND_NO_DISCOUNT') ? 'none' : '';
+            }
+        }
     }
 
     function collectUserPreferences() {
@@ -5218,7 +5261,11 @@
             var ev = _radioVal('en-case-type', 'COMMON');
             return ev === 'SIMPLE' ? 'en_simple' : 'en_common';
         }
-        if (g === '亚太组') return _radioVal('ap-case-type', 'ROOF') === 'GROUND' ? 'ap_ground' : 'ap_common';
+        if (g === '亚太组') {
+          var apv = _radioVal('ap-case-type', 'ROOF');
+          if (apv === 'GROUND_NO_DISCOUNT') return 'ap_ground_no_discount';
+          return apv === 'GROUND' ? 'ap_ground' : 'ap_common';
+        }
         return 'ko_normal';
     }
     function _getStoredPrint(caseKey) {
@@ -5337,16 +5384,44 @@
         ['ko-case-type', 'ja-case-type', 'en-case-type', 'ap-case-type'].forEach(function (name) {
             document.querySelectorAll('input[name="' + name + '"]').forEach(function (r) {
                 if (!r._printBound) { r._printBound = true; r.addEventListener('change', refreshPrintPanel); }
-                if (name === 'ap-case-type' && !r._reorganizeBound) {
-                    r._reorganizeBound = true;
+                    if (name === 'ap-case-type' && !r._reorganizeBound) {
+                        r._reorganizeBound = true;
                     r.addEventListener('change', function () {
                         var infoCard = containerEl.querySelector('.quotation-subcard-info');
                         if (infoCard) infoCard.style.display = isApGroundCase() ? '' : 'none';
                         if (typeof updateApModuleWattageVisibility === 'function') updateApModuleWattageVisibility();
+                        if (typeof updateApTradeVisibility === 'function') updateApTradeVisibility();
+                        var apDisc = document.getElementById('ap-discount-section');
+                        if (apDisc) {
+                            var ndEl = document.querySelector('input[name="ap-case-type"]:checked');
+                            apDisc.style.display = (ndEl && ndEl.value === 'GROUND_NO_DISCOUNT') ? 'none' : '';
+                        }
                     });
+                    }
+                });
+            });
+        // 初始同步折扣区块显隐（覆盖记忆的偏好）
+        var _apDiscInit = document.getElementById('ap-discount-section');
+        if (_apDiscInit) {
+            var _ndInit = document.querySelector('input[name="ap-case-type"]:checked');
+            _apDiscInit.style.display = (_ndInit && _ndInit.value === 'GROUND_NO_DISCOUNT') ? 'none' : '';
+        }
+        // 初始同步港口/目的港显隐（覆盖记忆的偏好）
+        if (typeof updateApTradeVisibility === 'function') updateApTradeVisibility();
+        // 浏览器刷新会恢复 ap-case-type 的 radio 选中但不触发 change 事件，
+        // 需在页面展示后再次同步港口/目的港与折扣区块显隐。
+        if (!window._ksApPortPageshowBound) {
+            window._ksApPortPageshowBound = true;
+            window.addEventListener('pageshow', function () {
+                var _ndPs = document.querySelector('input[name="ap-case-type"]:checked');
+                if (!_ndPs) return;
+                if (typeof updateApTradeVisibility === 'function') updateApTradeVisibility();
+                var _apDiscPs = document.getElementById('ap-discount-section');
+                if (_apDiscPs) {
+                    _apDiscPs.style.display = (_ndPs.value === 'GROUND_NO_DISCOUNT') ? 'none' : '';
                 }
             });
-        });
+        }
     }
 
     var _selectedJaContact = {};

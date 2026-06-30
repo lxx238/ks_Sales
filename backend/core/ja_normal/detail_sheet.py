@@ -615,68 +615,8 @@ def create_normal_detail_sheet(workbook, array_info, bom_products, price_mapping
         ws.cell(row=sub_row, column=_code_col).border = THIN_BORDER
     ws.row_dimensions[sub_row].height = 28
 
-    # Hidden category subtotal rows (for summary sheet discount formula references)
-    _std_disc_rate = float(steel_discount_rate if steel_discount_rate is not None else 84)
-    _purch_disc_rate = float(purchased_discount_rate if purchased_discount_rate is not None else 94)
-    _disc_rate_pct = float(nv_params.get('discount_rate', 71) if nv_params else 71)
-    cat_label_map = [
-        ('standard', '標準部品小計'),
-        ('steel', '碳鋼部品小計'),
-        ('purchased', '外購部品小計'),
-    ]
-    category_subtotal_rows = {}
-    cat_start_row = sub_row + 1
-    _label_merge_end = 9 if not _add_code else 10
-    for cat_idx, (cat, label) in enumerate(cat_label_map):
-        r = cat_start_row + cat_idx
-        category_subtotal_rows[cat] = r
-        ws.merge_cells(f'A{r}:{get_column_letter(_label_merge_end)}{r}')
-        cell_label = ws.cell(row=r, column=1, value=label)
-        cell_label.font = data_font
-        cell_label.alignment = Alignment(horizontal='right', vertical='center')
-        cell_label.border = THIN_BORDER
-        for c in range(2, _col_end + 1):
-            ws.cell(row=r, column=c).border = THIN_BORDER
-        cat_rows = _category_row_lists.get(cat, [])
-        if cat_rows:
-            refs = ','.join(f'{get_column_letter(TOTAL_COL)}{row}' for row in cat_rows)
-            cat_formula = f'=SUM({refs})'
-            if len(cat_formula) > 8000:
-                cat_formula = float(_category_sums[cat])
-        else:
-            cat_formula = 0
-        cell_cat = ws.cell(row=r, column=TOTAL_COL, value=cat_formula)
-        cell_cat.border = THIN_BORDER
-        cell_cat.number_format = NUM_FMT
-        cell_cat.font = data_font
-        cell_cat.alignment = CENTER
-        ws.row_dimensions[r].hidden = True
-        ws.row_dimensions[r].height = 24
-
-    discounted_row = cat_start_row + len(cat_label_map)
-    ws.merge_cells(f'A{discounted_row}:{get_column_letter(_label_merge_end)}{discounted_row}')
-    cell_disc_label = ws.cell(row=discounted_row, column=1, value='特別値引き後合計')
-    cell_disc_label.font = data_font
-    cell_disc_label.alignment = Alignment(horizontal='right', vertical='center')
-    cell_disc_label.border = THIN_BORDER
-    for c in range(2, _col_end + 1):
-        ws.cell(row=discounted_row, column=c).border = THIN_BORDER
-    _std_r = category_subtotal_rows['standard']
-    _steel_r = category_subtotal_rows['steel']
-    _purch_r = category_subtotal_rows['purchased']
-    ws.cell(
-        row=discounted_row, column=TOTAL_COL,
-        value=(
-            f'={get_column_letter(TOTAL_COL)}{_std_r}*{_disc_rate_pct}/100'
-            f'+{get_column_letter(TOTAL_COL)}{_steel_r}*{_std_disc_rate}/100'
-            f'+{get_column_letter(TOTAL_COL)}{_purch_r}*{_purch_disc_rate}/100'
-        )
-    )
-    ws.cell(row=discounted_row, column=TOTAL_COL).border = THIN_BORDER
-    ws.cell(row=discounted_row, column=TOTAL_COL).number_format = NUM_FMT
-    ws.cell(row=discounted_row, column=TOTAL_COL).font = data_font
-    ws.cell(row=discounted_row, column=TOTAL_COL).alignment = CENTER
-    ws.row_dimensions[discounted_row].height = 28
+    # Normal案件は特別値引き後合計等の小計行を出力せず、
+    # 合計シート側で総金額×アルミ値引き率のみで計算する。
 
     pile_data_start_row = 0
     pile_data_end_row = 0
@@ -688,7 +628,7 @@ def create_normal_detail_sheet(workbook, array_info, bom_products, price_mapping
     if pile_products:
         import tempfile as _tf
         _pile_tmp = _tf.mkdtemp(prefix='nv_pile_img_')
-        pile_start_row = discounted_row + 1
+        pile_start_row = sub_row + 1
 
         pile_seq = 1
         pile_data_start_row = pile_start_row
@@ -867,10 +807,10 @@ def create_normal_detail_sheet(workbook, array_info, bom_products, price_mapping
 
     return {
         'sheet_name': sheet_name,
-        'discount_total_row': discount_total_row,
+        'discount_total_row': None,
         'sub_total_row': sub_row,
-        'category_subtotal_rows': category_subtotal_rows,
-        'discounted_total_row': discounted_row,
+        'category_subtotal_rows': {},
+        'discounted_total_row': None,
         'pile_data_start_row': pile_data_start_row,
         'pile_data_end_row': pile_data_end_row,
         'pile_total_per_base': pile_total_per_base,

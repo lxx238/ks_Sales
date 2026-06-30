@@ -688,6 +688,7 @@ def create_total_materials_sheet(workbook, all_quotation_results, price_mapping=
 
     col_idx = 1
     col_no = col_idx; col_idx += 1
+    col_code = col_idx; col_idx += 1
     col_item = col_idx; col_idx += 1
     col_material = col_idx; col_idx += 1
     col_spec = col_idx; col_idx += 1
@@ -698,12 +699,11 @@ def create_total_materials_sheet(workbook, all_quotation_results, price_mapping=
     col_amount = col_idx; col_idx += 1
     if need_weight_code:
         col_weight = col_idx; col_idx += 1
-    if show_code or need_weight_code:
-        col_code = col_idx; col_idx += 1
     max_col = col_idx - 1
 
     col_widths = {}
     col_widths[get_column_letter(col_no)] = 8
+    col_widths[get_column_letter(col_code)] = 22
     col_widths[get_column_letter(col_item)] = 28
     col_widths[get_column_letter(col_material)] = 18
     col_widths[get_column_letter(col_spec)] = 24
@@ -715,8 +715,6 @@ def create_total_materials_sheet(workbook, all_quotation_results, price_mapping=
     col_widths[get_column_letter(col_amount)] = 18
     if need_weight_code:
         col_widths[get_column_letter(col_weight)] = 14
-    if show_code or need_weight_code:
-        col_widths[get_column_letter(col_code)] = 22
     for col, w in col_widths.items():
         ws.column_dimensions[col].width = w
 
@@ -732,6 +730,7 @@ def create_total_materials_sheet(workbook, all_quotation_results, price_mapping=
     header_row = 2
     headers = {
         col_no: _t('total_hdr_no', lang),
+        col_code: _t('total_hdr_code', lang),
         col_item: _t('total_hdr_item', lang),
         col_material: _t('total_hdr_material', lang),
         col_spec: _t('total_hdr_spec', lang),
@@ -744,8 +743,6 @@ def create_total_materials_sheet(workbook, all_quotation_results, price_mapping=
     headers[col_amount] = _t('total_hdr_amount', lang).format(currency=currency_label)
     if need_weight_code:
         headers[col_weight] = _t('hdr_weight', lang)
-    if show_code or need_weight_code:
-        headers[col_code] = _t('total_hdr_code', lang) if show_code else _t('hdr_remark', lang)
     for ci, h in headers.items():
         cell = ws.cell(row=header_row, column=ci, value=h)
         cell.font = bold_font
@@ -762,6 +759,10 @@ def create_total_materials_sheet(workbook, all_quotation_results, price_mapping=
         ws.cell(row=r, column=col_no, value=i + 1).font = normal_font
         ws.cell(row=r, column=col_no).alignment = center_align
         ws.cell(row=r, column=col_no).border = thin_border
+
+        ws.cell(row=r, column=col_code, value=item.get('code', '')).font = normal_font
+        ws.cell(row=r, column=col_code).alignment = center_align
+        ws.cell(row=r, column=col_code).border = thin_border
 
         ws.cell(row=r, column=col_item, value=item['name']).font = normal_font
         ws.cell(row=r, column=col_item).alignment = center_align
@@ -815,11 +816,6 @@ def create_total_materials_sheet(workbook, all_quotation_results, price_mapping=
                 ws.cell(row=r, column=col_weight, value='').font = normal_font
             ws.cell(row=r, column=col_weight).alignment = center_align
             ws.cell(row=r, column=col_weight).border = thin_border
-
-        if show_code or need_weight_code:
-            ws.cell(row=r, column=col_code, value=item.get('code', '')).font = normal_font
-            ws.cell(row=r, column=col_code).alignment = center_align
-            ws.cell(row=r, column=col_code).border = thin_border
 
         ws.row_dimensions[r].height = 22
 
@@ -1055,7 +1051,13 @@ def create_summary_sheet(
     ws.merge_cells(f'A{row}:C{row}')
     _sc(ws, row, 1, _t('common_wind_load', lang), font=normal_font, align=center, border=thin_border, fill=BLUE_FILL)
     ws.merge_cells(f'D{row}:G{row}')
-    _wind_display = str(max_wind) if str(max_wind).lower().endswith('m/s') else f'{max_wind} m/s' if max_wind else ''
+    _wind_display = ''
+    if max_wind:
+        import re as _re
+        _m = _re.search(r'(\d+(?:\.\d+)?)', str(max_wind))
+        if _m:
+            _wind_kmh = round(float(_m.group(1)) * 3.6)
+            _wind_display = f'{_wind_kmh} km/h'
     _sc(ws, row, 4, _wind_display, font=normal_font, align=center, border=thin_border)
     ws.merge_cells(f'H{row}:J{row}')
     _sc(ws, row, 8, _t('common_module_capacity', lang), font=normal_font, align=center, border=thin_border, fill=BLUE_FILL)
@@ -1106,7 +1108,7 @@ def create_summary_sheet(
     ws.merge_cells(f'K{row}:O{row}')
     layout_parts = []
     for a in arrays:
-        layout_parts.append(f"{a.get('rows', '')} {_t('layout_row', lang)} × {a.get('cols', '')} {_t('layout_column', lang)} {a.get('table_qty', 1)} × {_t('layout_tables', lang)}")
+        layout_parts.append(f"{a.get('rows', '')} {_t('layout_row', lang)} × {a.get('cols', '')} {_t('layout_column', lang)} × {a.get('table_qty', 1)} {_t('layout_tables', lang)}")
     layout_cell = _sc(ws, row, 11, '\n'.join(layout_parts) if layout_parts else '', font=normal_font, align=center, border=thin_border)
     layout_cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
     base_layout_height = 25
@@ -1170,7 +1172,7 @@ def create_summary_sheet(
         ws.cell(row=r, column=1).border = thin_border
 
         ws.merge_cells(f'B{r}:D{r}')
-        desc = f'{r_rows} {_t("layout_row", lang)} × {r_cols} {_t("layout_column", lang)} {r_set} × {_t("layout_tables", lang)}' if r_rows and r_cols else detail_sheet
+        desc = f'{r_rows} {_t("layout_row", lang)} × {r_cols} {_t("layout_column", lang)} × {r_set} {_t("layout_tables", lang)}' if r_rows and r_cols else detail_sheet
         ws.cell(row=r, column=2, value=desc).font = normal_font
         ws.cell(row=r, column=2).alignment = center
         ws.cell(row=r, column=2).border = thin_border

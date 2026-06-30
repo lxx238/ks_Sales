@@ -5,7 +5,7 @@ from .price_matcher import has_valid_price_info, load_price_mapping, resolve_pri
 
 def extract_matrix_data(matrix_file, group=None, ap_case_type=None):
     # 亚太组地面案件信息表为 KSENG 英文「Project information」，复用 en_simple 解析器
-    if group == '亚太组' and str(ap_case_type or '').upper() == 'GROUND':
+    if group == '亚太组' and str(ap_case_type or '').upper() in ('GROUND', 'GROUND_NO_DISCOUNT'):
         from backend.core.en_simple.matrix_parser import extract_matrix_data as en_extract
         return en_extract(matrix_file)
     if group == '日语组':
@@ -53,6 +53,9 @@ def split_and_create_quotations(*args, **kwargs):
     if group == '韩语组' and ko_case_type == 'NORMAL':
         from backend.core.ko_normal.quotation_builder import split_and_create_quotations as ko_split
         return ko_split(*args, **kwargs)
+    if group == '亚太组' and str(ap_case_type or '').upper() == 'GROUND_NO_DISCOUNT':
+        from backend.core.ap_ground_no_discount.quotation_builder import split_and_create_quotations as ap_nd_split
+        return ap_nd_split(*args, **kwargs)
     if group == '亚太组' and str(ap_case_type or '').upper() == 'GROUND':
         from backend.core.ap_ground.quotation_builder import split_and_create_quotations as ap_ground_split
         return ap_ground_split(*args, **kwargs)
